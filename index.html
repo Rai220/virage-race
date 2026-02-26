@@ -516,6 +516,14 @@ let transponderNames = JSON.parse(localStorage.getItem('vrTransponderNames') || 
 let pendingPassings = [];
 let registrationInProgress = false;
 
+// ── Race State ──
+let raceActive = false;
+let raceStartTime = null;
+let raceTimerInterval = null;
+let raceFinished = false;
+// Per-transponder: { firstPassTime, lastPassTime, laps: [lapTimeMs, ...] }
+let raceLapData = {};
+
 // ── DOM ──
 const $ = id => document.getElementById(id);
 const statusBadge = $('statusBadge');
@@ -1068,6 +1076,10 @@ function commitPassing(transponder, rawLine, ts) {
   row.innerHTML = `<td>${p.num}</td><td>${p.time}</td><td><span class="participant-name">${esc(name)} <span class="tid-small">#${esc(transponder)}</span></span></td><td class="transponder-id">${esc(transponder)}</td><td>${esc(rawLine)}</td>`;
   $('passingsContainer').scrollTop = 0;
   updateStats();
+
+  if (raceActive) {
+    recordRacePassing(transponder);
+  }
 }
 
 // ═══════════════════════════════════════
@@ -1147,6 +1159,149 @@ function exportCSV() {
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ═══════════════════════════════════════
+//  RACE MANAGEMENT
+// ═══════════════════════════════════════
+function startRace() {
+  raceActive = true;
+  raceFinished = false;
+  raceStartTime = Date.now();
+  raceLapData = {};
+
+  $('raceStartBtn').style.display = 'none';
+  $('raceStopBtn').style.display = '';
+  $('raceResetBtn').style.display = 'none';
+  $('raceResults').style.display = '';
+  $('raceEmpty').style.display = '';
+  $('raceResultsBody').innerHTML = '';
+
+  const timerEl = $('raceTimer');
+  timerEl.classList.remove('stopped');
+  const label = $('raceStatusLabel');
+  label.textContent = 'Гонка идёт';
+  label.className = 'race-status-label active';
+
+  raceTimerInterval = setInterval(() => {
+    if (!raceStartTime) return;
+    timerEl.textContent = formatRaceTime(Date.now() - raceStartTime);
+  }, 47);
+
+  showToast('Гонка началась!', 'success');
+  appendRaw('RACE', 'Start');
+}
+
+function stopRace() {
+  if (!raceActive) return;
+  raceActive = false;
+  raceFinished = true;
+
+  clearInterval(raceTimerInterval);
+  raceTimerInterval = null;
+
+  const elapsed = Date.now() - raceStartTime;
+  $('raceTimer').textContent = formatRaceTime(elapsed);
+  $('raceTimer').classList.add('stopped');
+
+  const label = $('raceStatusLabel');
+  label.textContent = 'Гонка завершена';
+  label.className = 'race-status-label finished';
+
+  $('raceStopBtn').style.display = 'none';
+  $('raceResetBtn').style.display = '';
+
+  renderRaceResults();
+  showToast('Гонка завершена!', 'info');
+  appendRaw('RACE', `Finish — ${formatRaceTime(elapsed)}`);
+}
+
+function resetRace() {
+  raceActive = false;
+  raceFinished = false;
+  raceStartTime = null;
+  raceLapData = {};
+  clearInterval(raceTimerInterval);
+  raceTimerInterval = null;
+
+  $('raceTimer').textContent = '00:00.000';
+  $('raceTimer').classList.remove('stopped');
+  const label = $('raceStatusLabel');
+  label.textContent = 'Ожидание старта';
+  label.className = 'race-status-label idle';
+
+  $('raceStartBtn').style.display = '';
+  $('raceStopBtn').style.display = 'none';
+  $('raceResetBtn').style.display = 'none';
+  $('raceResults').style.display = 'none';
+  $('raceResultsBody').innerHTML = '';
+}
+
+function recordRacePassing(transponder) {
+  if (!raceActive || !raceStartTime) return;
+
+  const now = Date.now();
+  const elapsedMs = now - raceStartTime;
+
+  if (!raceLapData[transponder]) {
+    raceLapData[transponder] = {
+      firstPassTime: elapsedMs,
+      lastPassTime: elapsedMs,
+      laps: []
+    };
+  } else {
+    const data = raceLapData[transponder];
+    const lapTime = elapsedMs - data.lastPassTime;
+    data.laps.push(lapTime);
+    data.lastPassTime = elapsedMs;
+  }
+
+  $('raceEmpty').style.display = 'none';
+  renderRaceResults();
+}
+
+function renderRaceResults() {
+  const body = $('raceResultsBody');
+  const entries = Object.entries(raceLapData);
+
+  entries.sort((a, b) => {
+    if (b[1].laps.length !== a[1].laps.length) return b[1].laps.length - a[1].laps.length;
+    return a[1].lastPassTime - b[1].lastPassTime;
+  });
+
+  body.innerHTML = '';
+  entries.forEach(([tid, data], idx) => {
+    const name = transponderNames[tid] || ('Машина #' + tid);
+    const lapsCount = data.laps.length;
+    const lastLap = lapsCount > 0 ? data.laps[lapsCount - 1] : null;
+    const bestLap = lapsCount > 0 ? Math.min(...data.laps) : null;
+    const avgLap = lapsCount > 0 ? data.laps.reduce((s, v) => s + v, 0) / lapsCount : null;
+    const totalTime = data.lastPassTime;
+
+    const row = document.createElement('tr');
+    row.innerHTML =
+      `<td>${idx + 1}</td>` +
+      `<td class="participant-col">${esc(name)} <span class="tid-small">#${esc(tid)}</span></td>` +
+      `<td class="laps-count">${lapsCount}</td>` +
+      `<td>${lastLap !== null ? formatRaceTime(lastLap) : '—'}</td>` +
+      `<td class="${bestLap !== null ? 'best-lap' : ''}">${bestLap !== null ? formatRaceTime(bestLap) : '—'}</td>` +
+      `<td>${avgLap !== null ? formatRaceTime(Math.round(avgLap)) : '—'}</td>` +
+      `<td>${formatRaceTime(totalTime)}</td>`;
+    body.appendChild(row);
+  });
+
+  if (entries.length === 0) {
+    $('raceEmpty').style.display = '';
+  }
+}
+
+function formatRaceTime(ms) {
+  if (ms < 0) ms = 0;
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  const millis = ms % 1000;
+  return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
+}
 
 navigator.hid?.addEventListener('disconnect', (e) => {
   if (hidDevice && e.device === hidDevice) {
