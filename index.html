@@ -241,6 +241,68 @@
       font-size: 11px; color: var(--text-dim); font-weight: 400; font-family: var(--mono);
     }
 
+    /* ── Race Panel ── */
+    .race-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+    }
+    .race-header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; flex-wrap: wrap;
+    }
+    .race-timer {
+      font-family: var(--mono); font-size: 48px; font-weight: 700;
+      color: var(--accent); text-align: center; line-height: 1;
+      letter-spacing: 2px; min-width: 240px;
+    }
+    .race-timer.stopped { color: var(--red); }
+    .race-controls { display: flex; gap: 10px; align-items: center; }
+    .btn-start {
+      background: var(--green-dim); color: var(--green);
+      border: 1px solid rgba(0, 230, 118, 0.25);
+      padding: 12px 28px; font-size: 16px;
+    }
+    .btn-start:hover { background: rgba(0, 230, 118, 0.25); }
+    .btn-stop {
+      background: var(--red-dim); color: var(--red);
+      border: 1px solid rgba(255, 82, 82, 0.25);
+      padding: 12px 28px; font-size: 16px;
+    }
+    .btn-stop:hover { background: rgba(255, 82, 82, 0.25); }
+    .race-status-label {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; margin-top: 4px; text-align: center;
+    }
+    .race-status-label.active { color: var(--green); }
+    .race-status-label.finished { color: var(--red); }
+    .race-status-label.idle { color: var(--text-dim); }
+
+    .race-results { margin-top: 20px; }
+    .race-results table { width: 100%; border-collapse: collapse; }
+    .race-results th {
+      text-align: left; padding: 10px 12px; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim);
+      border-bottom: 2px solid var(--border);
+    }
+    .race-results td {
+      padding: 10px 12px; font-size: 14px; font-family: var(--mono);
+      border-bottom: 1px solid var(--border); white-space: nowrap;
+    }
+    .race-results tr:last-child td { border-bottom: none; }
+    .race-results tbody tr { transition: background 0.15s; }
+    .race-results tbody tr:hover { background: var(--surface2); }
+    .race-results .best-lap { color: var(--green); font-weight: 700; }
+    .race-results .laps-count { color: var(--accent); font-weight: 700; }
+    .race-results .participant-col {
+      font-family: var(--font); font-weight: 600; color: var(--text);
+    }
+    .race-results .participant-col .tid-small {
+      font-size: 11px; color: var(--text-dim); font-weight: 400; font-family: var(--mono);
+    }
+    .race-empty {
+      text-align: center; padding: 32px 20px; color: var(--text-dim); font-size: 14px;
+    }
+
     @media (max-width: 600px) {
       .app { padding: 16px 12px; }
       header { flex-direction: column; align-items: flex-start; }
@@ -249,6 +311,9 @@
       select, input[type="number"], button { width: 100%; }
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
       .toast-container { left: 12px; right: 12px; max-width: none; }
+      .race-timer { font-size: 32px; min-width: auto; }
+      .race-header { flex-direction: column; align-items: stretch; text-align: center; }
+      .race-controls { justify-content: center; }
     }
   </style>
 </head>
@@ -345,6 +410,44 @@
       <div class="stat-card">
         <div class="stat-value" id="statUptime">00:00</div>
         <div class="stat-label">Время работы</div>
+      </div>
+    </div>
+
+    <div class="race-panel" id="racePanel">
+      <div class="card-title">Гонка</div>
+      <div class="race-header">
+        <div>
+          <div class="race-timer" id="raceTimer">00:00.000</div>
+          <div class="race-status-label idle" id="raceStatusLabel">Ожидание старта</div>
+        </div>
+        <div class="race-controls">
+          <button class="btn-start" id="raceStartBtn" onclick="startRace()">
+            &#9654; Старт
+          </button>
+          <button class="btn-stop" id="raceStopBtn" onclick="stopRace()" style="display:none;">
+            &#9632; Конец гонки
+          </button>
+          <button class="btn-secondary" id="raceResetBtn" onclick="resetRace()" style="display:none;">
+            Сброс
+          </button>
+        </div>
+      </div>
+      <div class="race-results" id="raceResults" style="display:none;">
+        <table>
+          <thead>
+            <tr>
+              <th>Поз.</th>
+              <th>Участник</th>
+              <th>Круги</th>
+              <th>Последний круг</th>
+              <th>Лучший круг</th>
+              <th>Средний круг</th>
+              <th>Общее время</th>
+            </tr>
+          </thead>
+          <tbody id="raceResultsBody"></tbody>
+        </table>
+        <div class="race-empty" id="raceEmpty">Ожидание проездов…</div>
       </div>
     </div>
 
