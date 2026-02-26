@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Virage Race — RC Transponder Decoder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #232733;
+      --border: #2e3345;
+      --text: #e4e6f0;
+      --text-dim: #8b8fa3;
+      --accent: #6c5ce7;
+      --accent-glow: rgba(108, 92, 231, 0.25);
+      --green: #00e676;
+      --green-dim: rgba(0, 230, 118, 0.15);
+      --red: #ff5252;
+      --red-dim: rgba(255, 82, 82, 0.15);
+      --yellow: #ffd740;
+      --radius: 12px;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    .app { max-width: 960px; margin: 0 auto; padding: 24px 20px; }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+    }
+
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo img { flex-shrink: 0; width: 52px; height: 52px; object-fit: cover; border-radius: 50%; }
+    .logo h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo span { color: var(--accent); }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+      background: var(--red-dim); color: var(--red); transition: all 0.3s;
+    }
+    .status-badge.connected { background: var(--green-dim); color: var(--green); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .status-badge.connected .status-dot { animation: pulse 2s ease-in-out infinite; }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 13px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 16px;
+    }
+
+    .controls { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label {
+      font-size: 12px; font-weight: 600; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: 0.3px;
+    }
+
+    select, input[type="number"] {
+      appearance: none; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); padding: 10px 14px;
+      font-size: 14px; font-family: var(--mono); outline: none;
+      transition: border-color 0.2s; min-width: 130px;
+    }
+    select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    select { cursor: pointer; padding-right: 32px; }
+
+    button {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 10px 20px; border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 600; font-family: var(--font);
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #7c6ef0; transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-danger { background: var(--red-dim); color: var(--red); }
+    .btn-danger:hover { background: rgba(255, 82, 82, 0.25); }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--border); }
+    .btn-warning { background: rgba(255, 215, 64, 0.12); color: var(--yellow); border: 1px solid rgba(255, 215, 64, 0.2); }
+    .btn-warning:hover { background: rgba(255, 215, 64, 0.2); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+    .btn-loading { pointer-events: none; opacity: 0.7; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; }
+
+    /* ── Toast ── */
+    .toast-container { position: fixed; top: 16px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
+    .toast { padding: 14px 18px; border-radius: 10px; font-size: 13px; font-weight: 500; line-height: 1.5; box-shadow: 0 8px 32px rgba(0,0,0,0.4); animation: toast-in 0.3s ease-out; cursor: pointer; transition: opacity 0.3s; }
+    .toast:hover { opacity: 0.8; }
+    .toast.error { background: #2d1517; border: 1px solid rgba(255,82,82,0.3); color: var(--red); }
+    .toast.success { background: #122417; border: 1px solid rgba(0,230,118,0.3); color: var(--green); }
+    .toast.info { background: #161a2e; border: 1px solid rgba(108,92,231,0.3); color: #a29bfe; }
+    .toast.warning { background: #2a2210; border: 1px solid rgba(255,215,64,0.3); color: var(--yellow); }
+    @keyframes toast-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    .info-banner {
+      background: rgba(108,92,231,0.08); border: 1px solid rgba(108,92,231,0.2);
+      border-radius: 10px; padding: 14px 18px; font-size: 13px; color: #a29bfe;
+      margin-bottom: 16px; line-height: 1.6;
+    }
+    .info-banner b { color: var(--text); }
+    .info-banner.warning-banner { background: rgba(255,82,82,0.08); border-color: rgba(255,82,82,0.2); color: var(--red); }
+
+    /* ── Scan Progress ── */
+    .scan-progress {
+      margin-top: 12px; padding: 14px; background: var(--surface2);
+      border-radius: 10px; display: none;
+    }
+    .scan-progress.visible { display: block; }
+    .scan-progress-title { font-size: 13px; font-weight: 600; color: var(--yellow); margin-bottom: 8px; }
+    .scan-bar-bg { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .scan-bar-fill { height: 100%; background: var(--yellow); border-radius: 3px; transition: width 0.3s; width: 0%; }
+    .scan-status { font-size: 12px; color: var(--text-dim); margin-top: 8px; font-family: var(--mono); }
+    .scan-results { margin-top: 10px; }
+    .scan-result-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 12px; background: var(--bg); border-radius: 6px; margin-bottom: 4px;
+      font-family: var(--mono); font-size: 13px;
+    }
+    .scan-result-item .baud { color: var(--accent); font-weight: 700; }
+    .scan-result-item .score { font-size: 11px; }
+    .scan-result-item .score.good { color: var(--green); }
+    .scan-result-item .score.bad { color: var(--red); }
+    .scan-result-item .btn-use {
+      padding: 4px 12px; font-size: 12px; border-radius: 6px;
+      background: var(--green-dim); color: var(--green); border: none; cursor: pointer;
+    }
+    .scan-result-item .btn-use:hover { background: rgba(0,230,118,0.25); }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .stat-card { background: var(--surface2); border-radius: 10px; padding: 14px; text-align: center; }
+    .stat-value { font-size: 28px; font-weight: 700; font-family: var(--mono); color: var(--accent); line-height: 1.2; }
+    .stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-top: 4px; }
+
+    .passings-table { width: 100%; border-collapse: collapse; }
+    .passings-table th { position: sticky; top: 0; background: var(--surface); text-align: left; padding: 10px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); border-bottom: 2px solid var(--border); }
+    .passings-table td { padding: 10px 12px; font-size: 14px; font-family: var(--mono); border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .passings-table tr:last-child td { border-bottom: none; }
+    .passings-table tbody tr { transition: background 0.15s; }
+    .passings-table tbody tr:hover { background: var(--surface2); }
+    .passings-table tbody tr.new-row { animation: row-flash 1s ease-out; }
+    @keyframes row-flash { 0% { background: var(--accent-glow); } 100% { background: transparent; } }
+    .transponder-id { font-weight: 700; color: var(--accent); }
+
+    .scroll-container { max-height: 400px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .scroll-container::-webkit-scrollbar { width: 6px; }
+    .scroll-container::-webkit-scrollbar-track { background: transparent; }
+    .scroll-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .raw-log {
+      font-family: var(--mono); font-size: 12px; line-height: 1.8;
+      color: var(--text-dim); white-space: pre-wrap; word-break: break-all;
+      max-height: 400px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .raw-log::-webkit-scrollbar { width: 6px; }
+    .raw-log::-webkit-scrollbar-track { background: transparent; }
+    .raw-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .raw-log .ts { color: var(--text-dim); }
+
+    .empty-state { text-align: center; padding: 48px 20px; color: var(--text-dim); }
+    .empty-state svg { margin-bottom: 16px; opacity: 0.3; }
+    .empty-state p { font-size: 14px; }
+
+    .actions-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; background: var(--surface2); padding: 4px; border-radius: 10px; width: fit-content; }
+    .tab-btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; background: transparent; color: var(--text-dim); border: none; }
+    .tab-btn.active { background: var(--accent); color: #fff; }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .device-info { margin-top: 12px; padding: 10px 14px; background: var(--surface2); border-radius: 8px; font-size: 12px; font-family: var(--mono); color: var(--text-dim); display: none; }
+    .device-info.visible { display: block; }
+    .device-info span { color: var(--green); }
+
+    /* ── Hex Dump ── */
+    .hex-dump { font-family: var(--mono); font-size: 11px; line-height: 1.6; }
+    .hex-dump .offset { color: var(--text-dim); }
+    .hex-dump .byte { color: var(--yellow); }
+    .hex-dump .byte.printable { color: var(--green); }
+    .hex-dump .ascii-col { color: var(--text-dim); margin-left: 12px; }
+    .hex-dump .ascii-col .printable { color: var(--green); }
+
+    /* ── Registration Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 10000;
+      background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      animation: fade-in 0.2s ease-out;
+    }
+    @keyframes fade-in { from { opacity: 0; } }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 28px 32px; width: 380px; max-width: 92vw;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+      animation: modal-pop 0.25s ease-out;
+    }
+    @keyframes modal-pop { from { transform: scale(0.92) translateY(12px); opacity: 0; } }
+    .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .modal-sub { font-size: 13px; color: var(--text-dim); margin-bottom: 20px; }
+    .modal-sub .tid { color: var(--accent); font-family: var(--mono); font-weight: 700; }
+    .modal-input {
+      width: 100%; padding: 12px 16px; border-radius: 10px;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); font-size: 15px; font-family: var(--font);
+      outline: none; transition: border-color 0.2s; margin-bottom: 16px;
+    }
+    .modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ── Participant badge ── */
+    .participant-name {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--font); font-weight: 600; color: var(--text);
+    }
+    .participant-name .tid-small {
+      font-size: 11px; color: var(--text-dim); font-weight: 400; font-family: var(--mono);
+    }
+
+    @media (max-width: 600px) {
+      .app { padding: 16px 12px; }
+      header { flex-direction: column; align-items: flex-start; }
+      .controls { flex-direction: column; }
+      .controls .field { width: 100%; }
+      select, input[type="number"], button { width: 100%; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .toast-container { left: 12px; right: 12px; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toast-container" id="toasts"></div>
+
+  <div class="app">
+    <header>
+      <div class="logo">
+        <img src="logo.png" alt="Вираж">
+        <h1>Virage <span>Race</span></h1>
+      </div>
+      <div class="status-badge" id="statusBadge">
+        <div class="status-dot"></div>
+        <span id="statusText">Отключено</span>
+      </div>
+    </header>
+
+    <div class="info-banner warning-banner" id="apiBanner" style="display:none;"></div>
+
+    <div class="info-banner" id="infoBanner">
+      <b>EasyLAP / Robitronic</b> — декодер работает по протоколу Robitronic через CP2110 @ 38400 бод.
+      Откройте в <b>Google Chrome</b> или <b>Edge</b>, нажмите «Подключить» и выберите <b>CP2110 HID USB-to-UART Bridge</b>.
+    </div>
+
+    <div class="card">
+      <div class="card-title">Подключение</div>
+      <div class="controls">
+        <div class="field">
+          <label>Скорость (бод)</label>
+          <select id="baudRate" onchange="onBaudRateChange()">
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400" selected>38400</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Биты данных</label>
+          <select id="dataBits">
+            <option value="3" selected>8</option>
+            <option value="2">7</option>
+            <option value="1">6</option>
+            <option value="0">5</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Чётность</label>
+          <select id="parity">
+            <option value="0" selected>Нет</option>
+            <option value="1">Нечёт</option>
+            <option value="2">Чёт</option>
+            <option value="3">Mark</option>
+            <option value="4">Space</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="btn-primary" id="connectBtn" onclick="toggleConnection()">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 8a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0Z" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v3l2 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Подключить
+          </button>
+        </div>
+        <div class="field" id="scanBtnWrap" style="display:none;">
+          <label>&nbsp;</label>
+          <button class="btn-warning" id="scanBtn" onclick="scanBaudRates()">
+            &#128269; Подобрать скорость
+          </button>
+        </div>
+      </div>
+      <div class="device-info" id="deviceInfo"></div>
+      <div class="scan-progress" id="scanProgress">
+        <div class="scan-progress-title" id="scanTitle">Сканирование скоростей…</div>
+        <div class="scan-bar-bg"><div class="scan-bar-fill" id="scanBar"></div></div>
+        <div class="scan-status" id="scanStatus"></div>
+        <div class="scan-results" id="scanResults"></div>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="statPassings">0</div>
+        <div class="stat-label">Проездов</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statTransponders">0</div>
+        <div class="stat-label">Транспондеров</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statBytes">0</div>
+        <div class="stat-label">Байт получено</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statUptime">00:00</div>
+        <div class="stat-label">Время работы</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="passings" onclick="switchTab('passings')">Проезды</button>
+        <button class="tab-btn" data-tab="raw" onclick="switchTab('raw')">Raw данные</button>
+        <button class="tab-btn" data-tab="hex" onclick="switchTab('hex')">HEX дамп</button>
+      </div>
+
+      <div class="tab-content active" id="tab-passings">
+        <div class="actions-row" style="margin-bottom: 12px;">
+          <button class="btn-secondary" onclick="clearPassings()" id="clearBtn" disabled>Очистить</button>
+          <button class="btn-secondary" onclick="exportCSV()" id="exportBtn" disabled>Экспорт CSV</button>
+        </div>
+        <div class="scroll-container" id="passingsContainer">
+          <div class="empty-state" id="emptyState">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="2"/><path d="M24 16v8l5 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <p>Подключите декодер и проведите транспондер<br>для начала записи данных</p>
+          </div>
+          <table class="passings-table" id="passingsTable" style="display:none;">
+            <thead><tr><th>#</th><th>Системное время</th><th>Участник</th><th>ID транспондера</th><th>Время декодера</th></tr></thead>
+            <tbody id="passingsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-raw">
+        <div class="actions-row" style="margin-bottom: 12px;">
+          <button class="btn-secondary" onclick="clearRaw()">Очистить лог</button>
+        </div>
+        <div class="raw-log" id="rawLog">Лог пуст. Подключите устройство для начала записи.</div>
+      </div>
+
+      <div class="tab-content" id="tab-hex">
+        <div class="actions-row" style="margin-bottom: 12px;">
+          <button class="btn-secondary" onclick="clearHex()">Очистить</button>
+        </div>
+        <div class="raw-log hex-dump" id="hexDump">HEX дамп пуст.</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ── Constants ──
+const CP2110_VID = 0x10C4;
+const CP2110_PID = 0x86B9;
+const REPORT_UART_ENABLE = 0x41;
+const REPORT_UART_CONFIG = 0x50;
+const BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 4800, 2400, 1200];
+
+// ── State ──
+let hidDevice = null;
+let connected = false;
+let uartBuffer = [];
+let passings = [];
+let totalBytes = 0;
+let uniqueTransponders = new Set();
+let startTime = null;
+let uptimeInterval = null;
+let scanning = false;
+let hexOffset = 0;
+let allReceivedBytes = []; // for hex dump
+let scanCollectedBytes = [];
+let transponderNames = JSON.parse(localStorage.getItem('vrTransponderNames') || '{}');
+let pendingPassings = [];
+let registrationInProgress = false;
+
+// ── DOM ──
+const $ = id => document.getElementById(id);
+const statusBadge = $('statusBadge');
+const statusText = $('statusText');
+const connectBtn = $('connectBtn');
+const rawLog = $('rawLog');
+const hexDump = $('hexDump');
+const passingsBody = $('passingsBody');
+const passingsTable = $('passingsTable');
+const emptyState = $('emptyState');
+
+// ── API Check ──
+const hasWebHID = 'hid' in navigator;
+if (!hasWebHID) {
+  $('apiBanner').innerHTML =
+    '&#9888; Ваш браузер не поддерживает WebHID API. Откройте в <b>Google Chrome</b> или <b>Microsoft Edge</b> 89+.';
+  $('apiBanner').style.display = '';
+  connectBtn.disabled = true;
+}
+
+// ═══════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════
+function showToast(msg, type = 'info', ms = 5000) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  t.onclick = () => t.remove();
+  $('toasts').appendChild(t);
+  if (ms > 0) setTimeout(() => t.remove(), ms);
+}
+
+// ═══════════════════════════════════════
+//  CONNECTION
+// ═══════════════════════════════════════
+async function toggleConnection() {
+  if (connected) { await disconnect(); return; }
+
+  connectBtn.classList.add('btn-loading');
+  connectBtn.innerHTML = '<div class="spinner"></div> Подключение…';
+
+  try {
+    const devices = await navigator.hid.requestDevice({
+      filters: [
+        { vendorId: CP2110_VID, productId: CP2110_PID },
+        { vendorId: CP2110_VID, productId: 0xEA80 },
+        { vendorId: CP2110_VID },
+      ]
+    });
+
+    if (!devices?.length) {
+      showToast('Устройство не выбрано. Выберите CP2110 в диалоге.', 'warning');
+      updateUI();
+      return;
+    }
+
+    hidDevice = devices[0];
+    if (!hidDevice.opened) await hidDevice.open();
+
+    showToast('Устройство открыто: ' + (hidDevice.productName || 'Unknown'), 'success');
+    appendRaw('OPEN', `HID: ${hidDevice.productName} VID=0x${hidDevice.vendorId.toString(16)} PID=0x${hidDevice.productId.toString(16)}`);
+
+    $('deviceInfo').innerHTML =
+      `Устройство: <span>${esc(hidDevice.productName || '?')}</span> | ` +
+      `VID: <span>0x${hidDevice.vendorId.toString(16).toUpperCase()}</span> | ` +
+      `PID: <span>0x${hidDevice.productId.toString(16).toUpperCase()}</span>`;
+    $('deviceInfo').classList.add('visible');
+
+    await configureUART();
+    await enableUART(true);
+
+    hidDevice.addEventListener('inputreport', handleInputReport);
+
+    connected = true;
+    startTime = Date.now();
+    updateUI();
+    startUptimeTimer();
+    $('scanBtnWrap').style.display = '';
+    $('infoBanner').style.display = 'none';
+    showToast('Подключено! EasyLAP / Robitronic @ 38400 бод. Проведите машинку мимо рамки.', 'success', 7000);
+
+  } catch (err) {
+    handleError(err);
+    updateUI();
+  }
+}
+
+async function disconnect() {
+  try {
+    if (hidDevice) {
+      try { await enableUART(false); } catch {}
+      hidDevice.removeEventListener('inputreport', handleInputReport);
+      await hidDevice.close();
+    }
+  } catch {}
+  hidDevice = null;
+  connected = false;
+  scanning = false;
+  stopUptimeTimer();
+  $('deviceInfo').classList.remove('visible');
+  $('scanBtnWrap').style.display = 'none';
+  $('scanProgress').classList.remove('visible');
+  updateUI();
+  showToast('Отключено', 'info');
+  appendRaw('DISCONNECTED', '');
+}
+
+function handleError(err) {
+  console.error('[VirageRace]', err);
+  if (err.name === 'NotAllowedError' || err.message?.includes('user gesture')) {
+    showToast('Браузер заблокировал запрос. Откройте страницу в обычном Google Chrome.', 'error', 8000);
+  } else if (err.message?.includes('No device selected')) {
+    showToast('Устройство не выбрано в диалоге.', 'warning');
+  } else {
+    showToast('Ошибка: ' + err.message, 'error');
+  }
+  appendRaw('ERROR', err.message);
+}
+
+// ═══════════════════════════════════════
+//  UART CONFIG (can change on the fly)
+// ═══════════════════════════════════════
+async function configureUART(baudOverride) {
+  const baud = baudOverride || parseInt($('baudRate').value);
+  const dataBits = parseInt($('dataBits').value);
+  const parity = parseInt($('parity').value);
+
+  const data = new Uint8Array(8);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, baud, false);
+  data[4] = parity;
+  data[5] = 0x00;
+  data[6] = dataBits;
+  data[7] = 0x00;
+
+  await hidDevice.sendFeatureReport(REPORT_UART_CONFIG, data);
+  appendRaw('CONFIG', `UART: ${baud} baud, 8${['N','O','E','M','S'][parity]}1`);
+}
+
+async function enableUART(enable) {
+  await hidDevice.sendFeatureReport(REPORT_UART_ENABLE, new Uint8Array([enable ? 1 : 0]));
+  appendRaw('UART', enable ? 'Enabled' : 'Disabled');
+}
+
+async function onBaudRateChange() {
+  if (!connected || !hidDevice) return;
+  try {
+    await configureUART();
+    uartBuffer = [];
+    showToast('Скорость изменена на ' + $('baudRate').value + ' бод', 'info');
+  } catch (err) {
+    showToast('Ошибка смены скорости: ' + err.message, 'error');
+  }
+}
+
+// ═══════════════════════════════════════
+//  BAUD RATE SCANNER
+// ═══════════════════════════════════════
+async function scanBaudRates() {
+  if (!connected || !hidDevice || scanning) return;
+  scanning = true;
+  $('scanBtn').disabled = true;
+  $('scanProgress').classList.add('visible');
+  $('scanResults').innerHTML = '';
+  $('scanTitle').textContent = 'Сканирование скоростей…';
+
+  const results = [];
+
+  for (let i = 0; i < BAUD_RATES.length; i++) {
+    if (!connected) break;
+    const baud = BAUD_RATES[i];
+    const pct = Math.round(((i + 1) / BAUD_RATES.length) * 100);
+    $('scanBar').style.width = pct + '%';
+    $('scanStatus').textContent = `Проверяю ${baud} бод… (${i + 1}/${BAUD_RATES.length})`;
+
+    scanCollectedBytes = [];
+    uartBuffer = [];
+
+    try {
+      await configureUART(baud);
+    } catch { continue; }
+
+    // Collect data for 2.5 seconds
+    await sleep(2500);
+
+    const bytes = scanCollectedBytes.slice();
+    const score = evaluateData(bytes);
+    results.push({ baud, bytes: bytes.length, score, sample: bytes.slice(0, 64) });
+  }
+
+  // Sort by score (higher = better)
+  results.sort((a, b) => b.score - a.score);
+
+  $('scanTitle').textContent = 'Результаты сканирования';
+  $('scanBar').style.width = '100%';
+  $('scanStatus').textContent = '';
+
+  const container = $('scanResults');
+  container.innerHTML = '';
+
+  if (results.length === 0 || results[0].bytes === 0) {
+    container.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:8px;">Данные не получены ни на одной скорости. Проверьте что декодер включён.</div>';
+  } else {
+    for (const r of results) {
+      if (r.bytes === 0) continue;
+      const isGood = r.score > 50;
+      const item = document.createElement('div');
+      item.className = 'scan-result-item';
+
+      const preview = Array.from(r.sample.slice(0, 16))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join(' ');
+
+      item.innerHTML = `
+        <div>
+          <span class="baud">${r.baud}</span> бод
+          &nbsp;—&nbsp; ${r.bytes} байт
+          &nbsp;—&nbsp; <span class="score ${isGood ? 'good' : 'bad'}">${isGood ? 'Читаемые' : 'Мусор'} (${r.score}%)</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span style="font-size:10px;color:var(--text-dim)">${preview}</span>
+          <button class="btn-use" onclick="applyBaud(${r.baud})">Применить</button>
+        </div>
+      `;
+      container.appendChild(item);
+    }
+
+    // Auto-apply best result
+    if (results[0].score > 30) {
+      await applyBaud(results[0].baud);
+      showToast(`Лучшая скорость: ${results[0].baud} бод (${results[0].score}% читаемых)`, 'success');
+    }
+  }
+
+  scanning = false;
+  $('scanBtn').disabled = false;
+}
+
+function evaluateData(bytes) {
+  if (bytes.length === 0) return 0;
+
+  let printable = 0;
+  let controlOk = 0; // CR, LF, TAB
+  let highBytes = 0;
+
+  for (const b of bytes) {
+    if (b >= 0x20 && b <= 0x7E) printable++;
+    else if (b === 0x0D || b === 0x0A || b === 0x09) controlOk++;
+    else if (b >= 0x80) highBytes++;
+  }
+
+  const readableRatio = (printable + controlOk) / bytes.length;
+
+  // If mostly printable ASCII + control chars = likely correct baud
+  // If mostly high bytes = likely wrong baud
+  return Math.round(readableRatio * 100);
+}
+
+async function applyBaud(baud) {
+  $('baudRate').value = baud;
+  if (connected && hidDevice) {
+    uartBuffer = [];
+    await configureUART(baud);
+    showToast(`Скорость установлена: ${baud} бод`, 'success');
+  }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ═══════════════════════════════════════
+//  DATA HANDLING
+// ═══════════════════════════════════════
+function handleInputReport(event) {
+  const { reportId, data } = event;
+  const length = reportId;
+  if (length === 0 || length > 63) return;
+
+  const bytes = new Uint8Array(data.buffer, data.byteOffset, Math.min(length, data.byteLength));
+  totalBytes += bytes.length;
+
+  // Collect for scanner
+  if (scanning) {
+    for (const b of bytes) scanCollectedBytes.push(b);
+  }
+
+  // Store for hex dump
+  for (const b of bytes) allReceivedBytes.push(b);
+  updateHexDump(bytes);
+
+  // Raw log
+  const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  const ascii = Array.from(bytes).map(b => (b >= 0x20 && b < 0x7F) ? String.fromCharCode(b) : '.').join('');
+  appendRaw('DATA', `[${bytes.length}B] ${hex}  |  ${ascii}`);
+
+  if (!scanning) {
+    for (const b of bytes) uartBuffer.push(b);
+    parseRobitronic();
+  }
+
+  updateStats();
+}
+
+// ═══════════════════════════════════════
+//  ROBITRONIC / EASYLAP PROTOCOL PARSER
+//
+//  Based on: https://github.com/florin-rosca-us/easylap-server
+//
+//  Packet types (first byte = total packet length):
+//    0x0B = Timer packet (11 bytes total)
+//      [0]=0x0B  [2]=0x83  [3..6]=timer_value (LE 32-bit)
+//
+//    0x0D = Car/transponder packet (13 bytes total)
+//      [0]=0x0D  [2]=0x84  [3..4]=uid (LE 16-bit)  [7..10]=timer_value (LE 32-bit)
+// ═══════════════════════════════════════
+function parseRobitronic() {
+  let maxIter = 500;
+  while (uartBuffer.length > 0 && maxIter-- > 0) {
+    const head = uartBuffer[0];
+
+    if (head === 0x0B) {
+      if (uartBuffer.length < 11) break;
+
+      if (uartBuffer[2] !== 0x83) {
+        uartBuffer.shift();
+        continue;
+      }
+
+      const pkt = uartBuffer.splice(0, 11);
+      const timerValue = pkt[3] | (pkt[4] << 8) | (pkt[5] << 16) | (pkt[6] * 0x1000000);
+      const timeStr = formatTimerValue(timerValue);
+      appendRaw('TIMER', `tick=${timerValue} (${timeStr})`);
+      // Timer packets update the internal clock — don't add as "passing"
+      continue;
+    }
+
+    if (head === 0x0D) {
+      if (uartBuffer.length < 13) break;
+
+      if (uartBuffer[2] !== 0x84) {
+        uartBuffer.shift();
+        continue;
+      }
+
+      const pkt = uartBuffer.splice(0, 13);
+      const uid = pkt[3] | (pkt[4] << 8);
+      const timerValue = pkt[7] | (pkt[8] << 8) | (pkt[9] << 16) | (pkt[10] * 0x1000000);
+      const timeStr = formatTimerValue(timerValue);
+
+      appendRaw('CAR', `uid=${uid} timer=${timerValue} (${timeStr})`);
+      addPassing(uid.toString(), timeStr);
+      continue;
+    }
+
+    // Unknown byte — discard
+    uartBuffer.shift();
+  }
+
+  // Safety: cap buffer size
+  if (uartBuffer.length > 500) {
+    const discarded = uartBuffer.length - 50;
+    uartBuffer.splice(0, discarded);
+    appendRaw('WARN', `Discarded ${discarded} unrecognized bytes`);
+  }
+}
+
+function formatTimerValue(ticks) {
+  // Timer values are in milliseconds
+  const totalMs = ticks;
+  const ms = totalMs % 1000;
+  const totalSec = Math.floor(totalMs / 1000);
+  const sec = totalSec % 60;
+  const min = Math.floor(totalSec / 60);
+  if (min > 0) {
+    return `${min}:${String(sec).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+  }
+  return `${sec}.${String(ms).padStart(3, '0')}`;
+}
+
+// ═══════════════════════════════════════
+//  HEX DUMP
+// ═══════════════════════════════════════
+function updateHexDump(newBytes) {
+  const startOffset = hexOffset;
+  hexOffset += newBytes.length;
+
+  // Build hex dump lines (16 bytes per line)
+  let startLine = Math.floor(startOffset / 16) * 16;
+  let endLine = Math.ceil(hexOffset / 16) * 16;
+
+  // Only show last 1024 bytes
+  const showStart = Math.max(0, allReceivedBytes.length - 1024);
+  const visibleBytes = allReceivedBytes.slice(showStart);
+
+  if (hexDump.textContent === 'HEX дамп пуст.') hexDump.textContent = '';
+
+  // Rebuild entire hex view for simplicity (capped at 1024 bytes)
+  let html = '';
+  for (let i = 0; i < visibleBytes.length; i += 16) {
+    const lineOffset = showStart + i;
+    const lineBytes = visibleBytes.slice(i, i + 16);
+    const offsetStr = lineOffset.toString(16).padStart(6, '0');
+
+    let hexPart = '';
+    let asciiPart = '';
+    for (let j = 0; j < 16; j++) {
+      if (j < lineBytes.length) {
+        const b = lineBytes[j];
+        const isPrintable = b >= 0x20 && b <= 0x7E;
+        hexPart += `<span class="byte${isPrintable ? ' printable' : ''}">${b.toString(16).padStart(2, '0')}</span> `;
+        asciiPart += `<span class="${isPrintable ? 'printable' : ''}">${isPrintable ? String.fromCharCode(b) : '.'}</span>`;
+      } else {
+        hexPart += '   ';
+        asciiPart += ' ';
+      }
+      if (j === 7) hexPart += ' ';
+    }
+
+    html += `<span class="offset">${offsetStr}</span>  ${hexPart} <span class="ascii-col">${asciiPart}</span>\n`;
+  }
+
+  hexDump.innerHTML = html;
+  hexDump.scrollTop = hexDump.scrollHeight;
+}
+
+function clearHex() {
+  allReceivedBytes = [];
+  hexOffset = 0;
+  hexDump.textContent = 'HEX дамп пуст.';
+}
+
+// ═══════════════════════════════════════
+//  BEEP SOUND (Web Audio API)
+// ═══════════════════════════════════════
+let audioCtx = null;
+function playBeep(freq = 880, durationMs = 80) {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durationMs / 1000);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + durationMs / 1000);
+  } catch {}
+}
+
+// ═══════════════════════════════════════
+//  TRANSPONDER REGISTRATION
+// ═══════════════════════════════════════
+function saveTransponderNames() {
+  localStorage.setItem('vrTransponderNames', JSON.stringify(transponderNames));
+}
+
+function showRegistrationModal(transponder) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">Новый участник</div>
+        <div class="modal-sub">Транспондер <span class="tid">#${esc(transponder)}</span> обнаружен впервые.<br>Введите имя участника:</div>
+        <input class="modal-input" id="regNameInput" type="text" placeholder="Имя участника" autocomplete="off" autofocus>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="regSkipBtn">Пропустить</button>
+          <button class="btn-primary" id="regSaveBtn">Сохранить</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const input = overlay.querySelector('#regNameInput');
+    const saveBtn = overlay.querySelector('#regSaveBtn');
+    const skipBtn = overlay.querySelector('#regSkipBtn');
+
+    function finish(name) {
+      overlay.remove();
+      resolve(name);
+    }
+
+    saveBtn.onclick = () => {
+      const name = input.value.trim();
+      finish(name || null);
+    };
+    skipBtn.onclick = () => finish(null);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') saveBtn.click();
+      if (e.key === 'Escape') skipBtn.click();
+    });
+
+    requestAnimationFrame(() => input.focus());
+  });
+}
+
+async function processRegistrationQueue() {
+  if (registrationInProgress) return;
+  registrationInProgress = true;
+
+  while (pendingPassings.length > 0) {
+    const item = pendingPassings[0];
+
+    if (!(item.transponder in transponderNames)) {
+      const name = await showRegistrationModal(item.transponder);
+      transponderNames[item.transponder] = name || ('Машина #' + item.transponder);
+      saveTransponderNames();
+      showToast(`Участник зарегистрирован: ${transponderNames[item.transponder]}`, 'success');
+    }
+
+    pendingPassings.shift();
+    commitPassing(item.transponder, item.rawLine, item.time);
+  }
+
+  registrationInProgress = false;
+}
+
+// ═══════════════════════════════════════
+//  PASSINGS
+// ═══════════════════════════════════════
+function addPassing(transponder, rawLine) {
+  const now = new Date();
+  const ts = now.toLocaleTimeString('ru-RU', { hour12: false }) +
+    '.' + String(now.getMilliseconds()).padStart(3, '0');
+
+  playBeep();
+
+  if (transponder in transponderNames) {
+    commitPassing(transponder, rawLine, ts);
+  } else {
+    pendingPassings.push({ transponder, rawLine, time: ts });
+    processRegistrationQueue();
+  }
+}
+
+function commitPassing(transponder, rawLine, ts) {
+  const name = transponderNames[transponder] || transponder;
+  const p = { num: passings.length + 1, time: ts, transponder, name, raw: rawLine, date: new Date() };
+  passings.push(p);
+  uniqueTransponders.add(transponder);
+
+  emptyState.style.display = 'none';
+  passingsTable.style.display = '';
+  $('clearBtn').disabled = false;
+  $('exportBtn').disabled = false;
+
+  const row = passingsBody.insertRow(0);
+  row.classList.add('new-row');
+  row.innerHTML = `<td>${p.num}</td><td>${p.time}</td><td><span class="participant-name">${esc(name)} <span class="tid-small">#${esc(transponder)}</span></span></td><td class="transponder-id">${esc(transponder)}</td><td>${esc(rawLine)}</td>`;
+  $('passingsContainer').scrollTop = 0;
+  updateStats();
+}
+
+// ═══════════════════════════════════════
+//  RAW LOG
+// ═══════════════════════════════════════
+let rawStarted = false;
+function appendRaw(tag, msg) {
+  if (!rawStarted) { rawLog.textContent = ''; rawStarted = true; }
+  const ts = new Date().toLocaleTimeString('ru-RU', { hour12: false }) +
+    '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+  const el = document.createElement('div');
+  el.innerHTML = `<span class="ts">[${ts}]</span> <b>${esc(tag)}</b> ${esc(msg)}`;
+  rawLog.appendChild(el);
+  while (rawLog.childElementCount > 500) rawLog.removeChild(rawLog.firstChild);
+  rawLog.scrollTop = rawLog.scrollHeight;
+}
+
+// ═══════════════════════════════════════
+//  UI
+// ═══════════════════════════════════════
+function updateUI() {
+  connectBtn.classList.remove('btn-loading');
+  if (connected) {
+    statusBadge.classList.add('connected');
+    statusText.textContent = 'Подключено';
+    connectBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Отключить';
+    connectBtn.className = 'btn-danger';
+  } else {
+    statusBadge.classList.remove('connected');
+    statusText.textContent = 'Отключено';
+    connectBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 8a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0Z" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v3l2 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Подключить';
+    connectBtn.className = 'btn-primary';
+  }
+}
+
+function updateStats() {
+  $('statPassings').textContent = passings.length;
+  $('statTransponders').textContent = uniqueTransponders.size;
+  $('statBytes').textContent = totalBytes > 1024 ? (totalBytes / 1024).toFixed(1) + 'K' : totalBytes;
+}
+
+function startUptimeTimer() {
+  uptimeInterval = setInterval(() => {
+    if (!startTime) return;
+    const s = Math.floor((Date.now() - startTime) / 1000);
+    $('statUptime').textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }, 1000);
+}
+function stopUptimeTimer() { clearInterval(uptimeInterval); }
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  $('tab-' + tab).classList.add('active');
+}
+
+function clearPassings() {
+  passings = []; uniqueTransponders.clear();
+  passingsBody.innerHTML = '';
+  emptyState.style.display = '';
+  passingsTable.style.display = 'none';
+  $('clearBtn').disabled = true;
+  $('exportBtn').disabled = true;
+  updateStats();
+}
+
+function clearRaw() { rawLog.textContent = ''; rawStarted = false; }
+
+function exportCSV() {
+  if (!passings.length) return;
+  const rows = passings.map(p => `${p.num},"${p.time}","${(p.name || '').replace(/"/g, '""')}","${p.transponder}","${p.raw.replace(/"/g, '""')}"`);
+  const csv = '#,Time,Participant,Transponder,Raw Data\n' + rows.join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `virage_race_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+navigator.hid?.addEventListener('disconnect', (e) => {
+  if (hidDevice && e.device === hidDevice) {
+    connected = false; hidDevice = null; scanning = false;
+    stopUptimeTimer();
+    $('deviceInfo').classList.remove('visible');
+    $('scanBtnWrap').style.display = 'none';
+    $('scanProgress').classList.remove('visible');
+    updateUI();
+    showToast('Устройство было отключено', 'warning');
+    appendRaw('DISCONNECTED', 'Unplugged');
+  }
+});
+</script>
+</body>
+</html>
