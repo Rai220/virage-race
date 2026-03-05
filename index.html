@@ -462,6 +462,12 @@
           <button class="btn-secondary" id="raceResetBtn" onclick="resetRace()" style="display:none;">
             Сброс
           </button>
+          <button class="btn-secondary" id="raceReportBtn" onclick="generateReport()" style="display:none;">
+            &#128196; Отчёт
+          </button>
+          <button class="btn-secondary" id="raceExcelBtn" onclick="exportRaceExcel()" style="display:none;">
+            &#128202; Excel
+          </button>
         </div>
       </div>
       <div class="race-results" id="raceResults" style="display:none;">
@@ -1311,6 +1317,8 @@ function startRace() {
   $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = '';
   $('raceResetBtn').style.display = 'none';
+  $('raceReportBtn').style.display = 'none';
+  $('raceExcelBtn').style.display = 'none';
   $('raceResults').style.display = '';
   $('raceEmpty').style.display = '';
   $('raceResultsBody').innerHTML = '';
@@ -1392,6 +1400,9 @@ function stopRace() {
   $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = 'none';
   $('raceResetBtn').style.display = '';
+  const hasData = Object.keys(raceLapData).length > 0;
+  $('raceReportBtn').style.display = hasData ? '' : 'none';
+  $('raceExcelBtn').style.display = hasData ? '' : 'none';
 
   renderRaceResults();
   showToast('Гонка завершена!', 'info');
@@ -1422,6 +1433,8 @@ function resetRace() {
   $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = 'none';
   $('raceResetBtn').style.display = 'none';
+  $('raceReportBtn').style.display = 'none';
+  $('raceExcelBtn').style.display = 'none';
   $('raceResults').style.display = 'none';
   $('raceResultsBody').innerHTML = '';
 }
@@ -1482,6 +1495,193 @@ function renderRaceResults() {
   if (entries.length === 0) {
     $('raceEmpty').style.display = '';
   }
+}
+
+function getRaceSortedEntries() {
+  const entries = Object.entries(raceLapData);
+  entries.sort((a, b) => {
+    if (b[1].laps.length !== a[1].laps.length) return b[1].laps.length - a[1].laps.length;
+    return a[1].lastPassTime - b[1].lastPassTime;
+  });
+  return entries.map(([tid, data], idx) => {
+    const name = transponderNames[tid] || ('Машина #' + tid);
+    const lapsCount = data.laps.length;
+    const bestLap = lapsCount > 0 ? Math.min(...data.laps) : null;
+    const avgLap = lapsCount > 0 ? data.laps.reduce((s, v) => s + v, 0) / lapsCount : null;
+    return { pos: idx + 1, tid, name, lapsCount, laps: data.laps, bestLap, avgLap, totalTime: data.lastPassTime };
+  });
+}
+
+function generateReport() {
+  const entries = getRaceSortedEntries();
+  if (entries.length === 0) return;
+
+  const raceTime = $('raceTimer').textContent;
+  const date = new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+  // Find max laps for the per-lap columns
+  const maxLaps = Math.max(...entries.map(e => e.lapsCount), 0);
+
+  let html = `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
+<title>Virage Race — Отчёт ${date}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; color: #1a1a1a; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 24px; margin-bottom: 4px; }
+  .meta { color: #666; font-size: 14px; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 32px; font-size: 13px; }
+  th { background: #f0f0f0; text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 700;
+       text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #ccc; }
+  td { padding: 7px 10px; border: 1px solid #ddd; font-family: 'Consolas', 'Courier New', monospace; }
+  tr:nth-child(even) { background: #fafafa; }
+  .pos-1 td:first-child { background: #ffd700; font-weight: 700; }
+  .pos-2 td:first-child { background: #c0c0c0; font-weight: 700; }
+  .pos-3 td:first-child { background: #cd7f32; color: #fff; font-weight: 700; }
+  .best { color: #00875a; font-weight: 700; }
+  .name { font-family: 'Segoe UI', Arial, sans-serif; font-weight: 600; }
+  h2 { font-size: 18px; margin: 28px 0 12px; }
+  .no-print { margin-bottom: 20px; }
+  @media print {
+    body { padding: 20px; }
+    .no-print { display: none; }
+    table { page-break-inside: auto; }
+    tr { page-break-inside: avoid; }
+  }
+</style></head><body>
+<div class="no-print">
+  <button onclick="window.print()" style="padding:10px 24px;font-size:15px;cursor:pointer;border:1px solid #ccc;border-radius:6px;background:#f5f5f5;">
+    &#128424; Печать
+  </button>
+</div>
+<h1>Virage Race — Результаты гонки</h1>
+<p class="meta">${date} &nbsp;|&nbsp; ${time} &nbsp;|&nbsp; Время гонки: ${esc(raceTime)} &nbsp;|&nbsp; Участников: ${entries.length}</p>
+
+<h2>Итоговая таблица</h2>
+<table>
+<thead><tr>
+  <th>Поз.</th><th>Участник</th><th>ID</th><th>Круги</th><th>Лучший круг</th><th>Средний круг</th><th>Общее время</th>
+</tr></thead><tbody>`;
+
+  entries.forEach(e => {
+    const posClass = e.pos <= 3 ? ` class="pos-${e.pos}"` : '';
+    html += `<tr${posClass}>
+      <td>${e.pos}</td>
+      <td class="name">${esc(e.name)}</td>
+      <td>${esc(e.tid)}</td>
+      <td>${e.lapsCount}</td>
+      <td${e.bestLap !== null ? ' class="best"' : ''}>${e.bestLap !== null ? formatRaceTime(e.bestLap) : '—'}</td>
+      <td>${e.avgLap !== null ? formatRaceTime(Math.round(e.avgLap)) : '—'}</td>
+      <td>${formatRaceTime(e.totalTime)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+
+  // Per-lap detail table
+  if (maxLaps > 0) {
+    html += '<h2>Детализация по кругам</h2><table><thead><tr><th>Участник</th>';
+    for (let i = 1; i <= maxLaps; i++) html += `<th>Круг ${i}</th>`;
+    html += '</tr></thead><tbody>';
+
+    entries.forEach(e => {
+      // Find this entry's best lap
+      html += `<tr><td class="name">${esc(e.name)}</td>`;
+      for (let i = 0; i < maxLaps; i++) {
+        if (i < e.laps.length) {
+          const isBest = e.laps[i] === e.bestLap;
+          html += `<td${isBest ? ' class="best"' : ''}>${formatRaceTime(e.laps[i])}</td>`;
+        } else {
+          html += '<td>—</td>';
+        }
+      }
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+
+  html += '</body></html>';
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+}
+
+function exportRaceExcel() {
+  const entries = getRaceSortedEntries();
+  if (entries.length === 0) return;
+
+  const maxLaps = Math.max(...entries.map(e => e.lapsCount), 0);
+  const date = new Date().toLocaleDateString('ru-RU');
+  const raceTime = $('raceTimer').textContent;
+
+  // Build XML Spreadsheet (opens natively in Excel without libraries)
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+  xml += '<?mso-application progid="Excel.Sheet"?>\n';
+  xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n';
+  xml += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n';
+
+  // Styles
+  xml += '<Styles>\n';
+  xml += '<Style ss:ID="Default"><Font ss:FontName="Calibri" ss:Size="11"/></Style>\n';
+  xml += '<Style ss:ID="Header"><Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1"/><Interior ss:Color="#F0F0F0" ss:Pattern="Solid"/></Style>\n';
+  xml += '<Style ss:ID="Title"><Font ss:FontName="Calibri" ss:Size="14" ss:Bold="1"/></Style>\n';
+  xml += '<Style ss:ID="Best"><Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#00875A"/></Style>\n';
+  xml += '</Styles>\n';
+
+  // Sheet 1: Summary
+  xml += '<Worksheet ss:Name="Результаты">\n<Table>\n';
+  // Title row
+  xml += `<Row><Cell ss:StyleID="Title"><Data ss:Type="String">Virage Race — ${date} — ${raceTime}</Data></Cell></Row>\n`;
+  xml += '<Row></Row>\n';
+  // Header
+  xml += '<Row>';
+  ['Поз.', 'Участник', 'ID', 'Круги', 'Лучший круг', 'Средний круг', 'Общее время'].forEach(h => {
+    xml += `<Cell ss:StyleID="Header"><Data ss:Type="String">${h}</Data></Cell>`;
+  });
+  xml += '</Row>\n';
+  // Data
+  entries.forEach(e => {
+    xml += '<Row>';
+    xml += `<Cell><Data ss:Type="Number">${e.pos}</Data></Cell>`;
+    xml += `<Cell><Data ss:Type="String">${e.name}</Data></Cell>`;
+    xml += `<Cell><Data ss:Type="String">${e.tid}</Data></Cell>`;
+    xml += `<Cell><Data ss:Type="Number">${e.lapsCount}</Data></Cell>`;
+    xml += `<Cell${e.bestLap !== null ? ' ss:StyleID="Best"' : ''}><Data ss:Type="String">${e.bestLap !== null ? formatRaceTime(e.bestLap) : '—'}</Data></Cell>`;
+    xml += `<Cell><Data ss:Type="String">${e.avgLap !== null ? formatRaceTime(Math.round(e.avgLap)) : '—'}</Data></Cell>`;
+    xml += `<Cell><Data ss:Type="String">${formatRaceTime(e.totalTime)}</Data></Cell>`;
+    xml += '</Row>\n';
+  });
+  xml += '</Table>\n</Worksheet>\n';
+
+  // Sheet 2: Lap details
+  xml += '<Worksheet ss:Name="Круги">\n<Table>\n';
+  xml += '<Row>';
+  xml += '<Cell ss:StyleID="Header"><Data ss:Type="String">Участник</Data></Cell>';
+  for (let i = 1; i <= maxLaps; i++) xml += `<Cell ss:StyleID="Header"><Data ss:Type="String">Круг ${i}</Data></Cell>`;
+  xml += '</Row>\n';
+
+  entries.forEach(e => {
+    xml += '<Row>';
+    xml += `<Cell><Data ss:Type="String">${e.name}</Data></Cell>`;
+    for (let i = 0; i < maxLaps; i++) {
+      if (i < e.laps.length) {
+        const isBest = e.laps[i] === e.bestLap;
+        xml += `<Cell${isBest ? ' ss:StyleID="Best"' : ''}><Data ss:Type="String">${formatRaceTime(e.laps[i])}</Data></Cell>`;
+      } else {
+        xml += '<Cell><Data ss:Type="String">—</Data></Cell>';
+      }
+    }
+    xml += '</Row>\n';
+  });
+  xml += '</Table>\n</Worksheet>\n';
+  xml += '</Workbook>';
+
+  const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `virage_race_${new Date().toISOString().slice(0, 10)}.xls`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 function formatRaceTime(ms) {
