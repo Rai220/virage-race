@@ -232,6 +232,24 @@
     .modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
+    /* ── Participants list modal ── */
+    .participants-list { max-height: 340px; overflow-y: auto; margin-bottom: 16px; }
+    .participant-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; border-radius: 8px; background: var(--surface2);
+      margin-bottom: 6px; gap: 10px;
+    }
+    .participant-item-info { display: flex; flex-direction: column; min-width: 0; }
+    .participant-item-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .participant-item-tid { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+    .participant-item .btn-delete {
+      flex-shrink: 0; background: var(--red-dim); color: var(--red); border: none;
+      border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .participant-item .btn-delete:hover { background: var(--red); color: #fff; }
+    .participants-empty { color: var(--text-dim); font-size: 13px; text-align: center; padding: 24px 0; }
+
     /* ── Participant badge ── */
     .participant-name {
       display: inline-flex; align-items: center; gap: 6px;
@@ -256,6 +274,8 @@
       letter-spacing: 2px; min-width: 240px;
     }
     .race-timer.stopped { color: var(--red); }
+    .race-timer.paused { color: var(--yellow); animation: blink-pause 1s step-end infinite; }
+    @keyframes blink-pause { 50% { opacity: 0.4; } }
     .race-controls { display: flex; gap: 10px; align-items: center; }
     .btn-start {
       background: var(--green-dim); color: var(--green);
@@ -269,6 +289,12 @@
       padding: 12px 28px; font-size: 16px;
     }
     .btn-stop:hover { background: rgba(255, 82, 82, 0.25); }
+    .btn-pause {
+      background: rgba(255, 215, 64, 0.12); color: var(--yellow);
+      border: 1px solid rgba(255, 215, 64, 0.25);
+      padding: 12px 28px; font-size: 16px;
+    }
+    .btn-pause:hover { background: rgba(255, 215, 64, 0.25); }
     .race-status-label {
       font-size: 12px; font-weight: 700; text-transform: uppercase;
       letter-spacing: 1px; margin-top: 4px; text-align: center;
@@ -424,6 +450,12 @@
           <button class="btn-start" id="raceStartBtn" onclick="startRace()">
             &#9654; Старт
           </button>
+          <button class="btn-pause" id="racePauseBtn" onclick="pauseRace()" style="display:none;">
+            &#10074;&#10074; Пауза
+          </button>
+          <button class="btn-start" id="raceResumeBtn" onclick="resumeRace()" style="display:none;">
+            &#9654; Продолжить
+          </button>
           <button class="btn-stop" id="raceStopBtn" onclick="stopRace()" style="display:none;">
             &#9632; Конец гонки
           </button>
@@ -462,6 +494,7 @@
         <div class="actions-row" style="margin-bottom: 12px;">
           <button class="btn-secondary" onclick="clearPassings()" id="clearBtn" disabled>Очистить</button>
           <button class="btn-secondary" onclick="exportCSV()" id="exportBtn" disabled>Экспорт CSV</button>
+          <button class="btn-secondary" onclick="showParticipantsModal()">Участники</button>
         </div>
         <div class="scroll-container" id="passingsContainer">
           <div class="empty-state" id="emptyState">
@@ -518,10 +551,15 @@ let registrationInProgress = false;
 
 // ── Race State ──
 let raceActive = false;
+let racePaused = false;
 let raceStartTime = null;
 let raceTimerInterval = null;
 let raceFinished = false;
-// Per-transponder: { firstPassTime, lastPassTime, laps: [lapTimeMs, ...] }
+let racePausedTotal = 0;
+let racePauseStart = null;
+let raceStartDecoderTime = null; // decoder timerValue at race start
+let lastDecoderTimerValue = null; // latest decoder timer value from any packet
+// Per-transponder: { firstDecoderTime, lastDecoderTime, firstPassTime, lastPassTime, laps: [lapTimeMs, ...] }
 let raceLapData = {};
 
 // ── DOM ──
@@ -535,11 +573,32 @@ const passingsBody = $('passingsBody');
 const passingsTable = $('passingsTable');
 const emptyState = $('emptyState');
 
+// ── Settings persistence ──
+const SETTINGS_KEYS = ['baudRate', 'dataBits', 'parity'];
+function loadSettings() {
+  const saved = JSON.parse(localStorage.getItem('vrSettings') || '{}');
+  SETTINGS_KEYS.forEach(key => {
+    if (saved[key] !== undefined) $(key).value = saved[key];
+  });
+}
+function saveSettings() {
+  const settings = {};
+  SETTINGS_KEYS.forEach(key => { settings[key] = $(key).value; });
+  localStorage.setItem('vrSettings', JSON.stringify(settings));
+}
+loadSettings();
+SETTINGS_KEYS.forEach(key => {
+  $(key).addEventListener('change', saveSettings);
+});
+
 // ── API Check ──
-const hasWebHID = 'hid' in navigator;
+const hasWebHID = !!navigator.hid;
 if (!hasWebHID) {
-  $('apiBanner').innerHTML =
-    '&#9888; Ваш браузер не поддерживает WebHID API. Откройте в <b>Google Chrome</b> или <b>Microsoft Edge</b> 89+.';
+  const isInsecure = location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+  const hint = isInsecure
+    ? 'WebHID недоступен в незащищённом контексте. Откройте страницу по <b>HTTPS</b> или через <b>localhost</b>.'
+    : 'Ваш браузер не поддерживает WebHID API. Используйте браузер на основе Chromium (Chrome, Edge, Opera и др.).';
+  $('apiBanner').innerHTML = '&#9888; ' + hint;
   $('apiBanner').style.display = '';
   connectBtn.disabled = true;
 }
@@ -854,6 +913,7 @@ function parseRobitronic() {
       const pkt = uartBuffer.splice(0, 11);
       const timerValue = pkt[3] | (pkt[4] << 8) | (pkt[5] << 16) | (pkt[6] * 0x1000000);
       const timeStr = formatTimerValue(timerValue);
+      lastDecoderTimerValue = timerValue;
       appendRaw('TIMER', `tick=${timerValue} (${timeStr})`);
       // Timer packets update the internal clock — don't add as "passing"
       continue;
@@ -872,8 +932,9 @@ function parseRobitronic() {
       const timerValue = pkt[7] | (pkt[8] << 8) | (pkt[9] << 16) | (pkt[10] * 0x1000000);
       const timeStr = formatTimerValue(timerValue);
 
+      lastDecoderTimerValue = timerValue;
       appendRaw('CAR', `uid=${uid} timer=${timerValue} (${timeStr})`);
-      addPassing(uid.toString(), timeStr);
+      addPassing(uid.toString(), timeStr, timerValue);
       continue;
     }
 
@@ -981,6 +1042,51 @@ function saveTransponderNames() {
   localStorage.setItem('vrTransponderNames', JSON.stringify(transponderNames));
 }
 
+function showParticipantsModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+
+  function render() {
+    const entries = Object.entries(transponderNames);
+    const listHtml = entries.length === 0
+      ? '<div class="participants-empty">Нет зарегистрированных участников</div>'
+      : entries.map(([tid, name]) => `
+          <div class="participant-item" data-tid="${esc(tid)}">
+            <div class="participant-item-info">
+              <div class="participant-item-name">${esc(name)}</div>
+              <div class="participant-item-tid">#${esc(tid)}</div>
+            </div>
+            <button class="btn-delete" data-tid="${esc(tid)}">Удалить</button>
+          </div>
+        `).join('');
+
+    overlay.innerHTML = `
+      <div class="modal" style="width: 420px;">
+        <div class="modal-title">Участники</div>
+        <div class="modal-sub">Зарегистрировано: ${entries.length}</div>
+        <div class="participants-list">${listHtml}</div>
+        <div class="modal-actions">
+          <button class="btn-primary" id="participantsCloseBtn">Закрыть</button>
+        </div>
+      </div>
+    `;
+
+    overlay.querySelector('#participantsCloseBtn').onclick = () => overlay.remove();
+    overlay.querySelectorAll('.btn-delete').forEach(btn => {
+      btn.onclick = () => {
+        const tid = btn.dataset.tid;
+        delete transponderNames[tid];
+        saveTransponderNames();
+        render();
+        showToast(`Участник удалён (транспондер #${tid})`, 'info');
+      };
+    });
+  }
+
+  render();
+  document.body.appendChild(overlay);
+}
+
 function showRegistrationModal(transponder) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
@@ -1036,7 +1142,7 @@ async function processRegistrationQueue() {
     }
 
     pendingPassings.shift();
-    commitPassing(item.transponder, item.rawLine, item.time);
+    commitPassing(item.transponder, item.rawLine, item.time, item.decoderTimerMs);
   }
 
   registrationInProgress = false;
@@ -1045,7 +1151,28 @@ async function processRegistrationQueue() {
 // ═══════════════════════════════════════
 //  PASSINGS
 // ═══════════════════════════════════════
-function addPassing(transponder, rawLine) {
+const SIGNAL_GAP_MS = 3000; // car must be absent from loop for at least 3s to count as new passing
+const lastRawSignalTime = {}; // transponder → decoder timerValue of latest raw signal (any, including filtered)
+const lastAcceptedTime = {}; // transponder → decoder timerValue of last accepted passing
+
+function addPassing(transponder, rawLine, decoderTimerMs) {
+  const prevRaw = lastRawSignalTime[transponder];
+  lastRawSignalTime[transponder] = decoderTimerMs;
+
+  // First ever signal from this transponder — accept
+  if (prevRaw === undefined) {
+    lastAcceptedTime[transponder] = decoderTimerMs;
+  } else {
+    const gapSinceLastRaw = decoderTimerMs - prevRaw;
+    if (gapSinceLastRaw < SIGNAL_GAP_MS) {
+      // Car is still on the loop (continuous signals) — ignore
+      appendRaw('SKIP', `uid=${transponder} on loop (gap=${gapSinceLastRaw}ms)`);
+      return;
+    }
+    // Gap detected — car left and came back, accept as new passing
+    lastAcceptedTime[transponder] = decoderTimerMs;
+  }
+
   const now = new Date();
   const ts = now.toLocaleTimeString('ru-RU', { hour12: false }) +
     '.' + String(now.getMilliseconds()).padStart(3, '0');
@@ -1053,14 +1180,14 @@ function addPassing(transponder, rawLine) {
   playBeep();
 
   if (transponder in transponderNames) {
-    commitPassing(transponder, rawLine, ts);
+    commitPassing(transponder, rawLine, ts, decoderTimerMs);
   } else {
-    pendingPassings.push({ transponder, rawLine, time: ts });
+    pendingPassings.push({ transponder, rawLine, time: ts, decoderTimerMs });
     processRegistrationQueue();
   }
 }
 
-function commitPassing(transponder, rawLine, ts) {
+function commitPassing(transponder, rawLine, ts, decoderTimerMs) {
   const name = transponderNames[transponder] || transponder;
   const p = { num: passings.length + 1, time: ts, transponder, name, raw: rawLine, date: new Date() };
   passings.push(p);
@@ -1078,7 +1205,7 @@ function commitPassing(transponder, rawLine, ts) {
   updateStats();
 
   if (raceActive) {
-    recordRacePassing(transponder);
+    recordRacePassing(transponder, decoderTimerMs);
   }
 }
 
@@ -1163,13 +1290,25 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s; re
 // ═══════════════════════════════════════
 //  RACE MANAGEMENT
 // ═══════════════════════════════════════
+function getRaceElapsed() {
+  if (!raceStartTime) return 0;
+  const now = racePaused ? racePauseStart : Date.now();
+  return now - raceStartTime - racePausedTotal;
+}
+
 function startRace() {
   raceActive = true;
+  racePaused = false;
   raceFinished = false;
   raceStartTime = Date.now();
+  raceStartDecoderTime = lastDecoderTimerValue || 0;
+  racePausedTotal = 0;
+  racePauseStart = null;
   raceLapData = {};
 
   $('raceStartBtn').style.display = 'none';
+  $('racePauseBtn').style.display = '';
+  $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = '';
   $('raceResetBtn').style.display = 'none';
   $('raceResults').style.display = '';
@@ -1178,35 +1317,79 @@ function startRace() {
 
   const timerEl = $('raceTimer');
   timerEl.classList.remove('stopped');
+  timerEl.classList.remove('paused');
   const label = $('raceStatusLabel');
   label.textContent = 'Гонка идёт';
   label.className = 'race-status-label active';
 
   raceTimerInterval = setInterval(() => {
-    if (!raceStartTime) return;
-    timerEl.textContent = formatRaceTime(Date.now() - raceStartTime);
+    if (!raceStartTime || racePaused) return;
+    timerEl.textContent = formatRaceTime(getRaceElapsed());
   }, 47);
 
   showToast('Гонка началась!', 'success');
   appendRaw('RACE', 'Start');
 }
 
+function pauseRace() {
+  if (!raceActive || racePaused) return;
+  racePaused = true;
+  racePauseStart = Date.now();
+
+  $('racePauseBtn').style.display = 'none';
+  $('raceResumeBtn').style.display = '';
+
+  const label = $('raceStatusLabel');
+  label.textContent = 'Пауза';
+  label.className = 'race-status-label finished';
+  $('raceTimer').classList.add('paused');
+
+  showToast('Гонка на паузе', 'warning');
+  appendRaw('RACE', 'Pause');
+}
+
+function resumeRace() {
+  if (!raceActive || !racePaused) return;
+  racePausedTotal += Date.now() - racePauseStart;
+  racePaused = false;
+  racePauseStart = null;
+
+  $('racePauseBtn').style.display = '';
+  $('raceResumeBtn').style.display = 'none';
+
+  const label = $('raceStatusLabel');
+  label.textContent = 'Гонка идёт';
+  label.className = 'race-status-label active';
+  $('raceTimer').classList.remove('paused');
+
+  showToast('Гонка продолжается!', 'success');
+  appendRaw('RACE', 'Resume');
+}
+
 function stopRace() {
   if (!raceActive) return;
+  if (racePaused) {
+    racePausedTotal += Date.now() - racePauseStart;
+    racePaused = false;
+    racePauseStart = null;
+  }
   raceActive = false;
   raceFinished = true;
 
   clearInterval(raceTimerInterval);
   raceTimerInterval = null;
 
-  const elapsed = Date.now() - raceStartTime;
+  const elapsed = getRaceElapsed();
   $('raceTimer').textContent = formatRaceTime(elapsed);
+  $('raceTimer').classList.remove('paused');
   $('raceTimer').classList.add('stopped');
 
   const label = $('raceStatusLabel');
   label.textContent = 'Гонка завершена';
   label.className = 'race-status-label finished';
 
+  $('racePauseBtn').style.display = 'none';
+  $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = 'none';
   $('raceResetBtn').style.display = '';
 
@@ -1217,42 +1400,49 @@ function stopRace() {
 
 function resetRace() {
   raceActive = false;
+  racePaused = false;
   raceFinished = false;
   raceStartTime = null;
+  raceStartDecoderTime = null;
+  racePausedTotal = 0;
+  racePauseStart = null;
   raceLapData = {};
   clearInterval(raceTimerInterval);
   raceTimerInterval = null;
 
   $('raceTimer').textContent = '00:00.000';
   $('raceTimer').classList.remove('stopped');
+  $('raceTimer').classList.remove('paused');
   const label = $('raceStatusLabel');
   label.textContent = 'Ожидание старта';
   label.className = 'race-status-label idle';
 
   $('raceStartBtn').style.display = '';
+  $('racePauseBtn').style.display = 'none';
+  $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = 'none';
   $('raceResetBtn').style.display = 'none';
   $('raceResults').style.display = 'none';
   $('raceResultsBody').innerHTML = '';
 }
 
-function recordRacePassing(transponder) {
-  if (!raceActive || !raceStartTime) return;
-
-  const now = Date.now();
-  const elapsedMs = now - raceStartTime;
+function recordRacePassing(transponder, decoderTimerMs) {
+  if (!raceActive || !raceStartTime || racePaused) return;
 
   if (!raceLapData[transponder]) {
     raceLapData[transponder] = {
-      firstPassTime: elapsedMs,
-      lastPassTime: elapsedMs,
+      firstDecoderTime: decoderTimerMs,
+      lastDecoderTime: decoderTimerMs,
+      firstPassTime: decoderTimerMs - raceStartDecoderTime,
+      lastPassTime: decoderTimerMs - raceStartDecoderTime,
       laps: []
     };
   } else {
     const data = raceLapData[transponder];
-    const lapTime = elapsedMs - data.lastPassTime;
+    const lapTime = decoderTimerMs - data.lastDecoderTime;
     data.laps.push(lapTime);
-    data.lastPassTime = elapsedMs;
+    data.lastDecoderTime = decoderTimerMs;
+    data.lastPassTime = decoderTimerMs - raceStartDecoderTime;
   }
 
   $('raceEmpty').style.display = 'none';
