@@ -363,6 +363,9 @@
     <div class="info-banner" id="infoBanner">
       <b>EasyLAP / Robitronic</b> — декодер работает по протоколу Robitronic через CP2110 @ 38400 бод.
       Откройте в <b>Google Chrome</b> или <b>Edge</b>, нажмите «Подключить» и выберите <b>CP2110 HID USB-to-UART Bridge</b>.
+      <br><br>
+      Автор: <b>Rai220</b> &nbsp;|&nbsp; Лицензия: <b>MIT</b> &nbsp;|&nbsp;
+      <a href="https://github.com/Rai220/virage-race" target="_blank" rel="noopener" style="color: #a29bfe; text-decoration: underline;">GitHub</a>
     </div>
 
     <div class="card">
@@ -1532,8 +1535,8 @@ function generateReport() {
   .meta { color: #666; font-size: 14px; margin-bottom: 24px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 32px; font-size: 13px; }
   th { background: #f0f0f0; text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 700;
-       text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #ccc; }
-  td { padding: 7px 10px; border: 1px solid #ddd; font-family: 'Consolas', 'Courier New', monospace; }
+       text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #ccc; white-space: nowrap; }
+  td { padding: 7px 10px; border: 1px solid #ddd; font-family: 'Consolas', 'Courier New', monospace; white-space: nowrap; }
   tr:nth-child(even) { background: #fafafa; }
   .pos-1 td:first-child { background: #ffd700; font-weight: 700; }
   .pos-2 td:first-child { background: #c0c0c0; font-weight: 700; }
@@ -1542,11 +1545,17 @@ function generateReport() {
   .name { font-family: 'Segoe UI', Arial, sans-serif; font-weight: 600; }
   h2 { font-size: 18px; margin: 28px 0 12px; }
   .no-print { margin-bottom: 20px; }
+  @page { size: landscape; margin: 10mm; }
   @media print {
-    body { padding: 20px; }
+    body { padding: 10px; max-width: 100%; }
     .no-print { display: none; }
-    table { page-break-inside: auto; }
+    table { page-break-inside: auto; font-size: 9px; }
+    th { padding: 4px 5px; font-size: 8px; }
+    td { padding: 3px 5px; }
     tr { page-break-inside: avoid; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 14px; margin: 16px 0 8px; }
+    .meta { font-size: 11px; margin-bottom: 12px; }
   }
 </style></head><body>
 <div class="no-print">
