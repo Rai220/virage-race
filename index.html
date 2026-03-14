@@ -124,6 +124,13 @@
     .info-banner b { color: var(--text); }
     .info-banner.warning-banner { background: rgba(255,82,82,0.08); border-color: rgba(255,82,82,0.2); color: var(--red); }
 
+    .app-footer {
+      margin-top: 32px; padding: 14px 18px; text-align: center;
+      font-size: 13px; color: var(--text-dim); border-top: 1px solid var(--border);
+    }
+    .app-footer b { color: var(--text); }
+    .app-footer a { color: var(--accent); text-decoration: underline; }
+
     /* ── Scan Progress ── */
     .scan-progress {
       margin-top: 12px; padding: 14px; background: var(--surface2);
@@ -363,9 +370,6 @@
     <div class="info-banner" id="infoBanner">
       <b>EasyLAP / Robitronic</b> — декодер работает по протоколу Robitronic через CP2110 @ 38400 бод.
       Откройте в <b>Google Chrome</b> или <b>Edge</b>, нажмите «Подключить» и выберите <b>CP2110 HID USB-to-UART Bridge</b>.
-      <br><br>
-      Автор: <b>Rai220</b> &nbsp;|&nbsp; Лицензия: <b>MIT</b> &nbsp;|&nbsp;
-      <a href="https://github.com/Rai220/virage-race" target="_blank" rel="noopener" style="color: #a29bfe; text-decoration: underline;">GitHub</a>
     </div>
 
     <div class="card">
@@ -530,6 +534,11 @@
         </div>
         <div class="raw-log hex-dump" id="hexDump">HEX дамп пуст.</div>
       </div>
+    </div>
+
+    <div class="app-footer">
+      Автор: <b>Rai220</b> &nbsp;|&nbsp; Лицензия: <b>MIT</b> &nbsp;|&nbsp;
+      <a href="https://github.com/Rai220/virage-race" target="_blank" rel="noopener">GitHub</a>
     </div>
   </div>
 
