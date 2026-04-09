@@ -1806,6 +1806,7 @@ function generateReport() {
   .pos-2 td:first-child { background: #c0c0c0; font-weight: 700; }
   .pos-3 td:first-child { background: #cd7f32; color: #fff; font-weight: 700; }
   .best { color: #00875a; font-weight: 700; }
+  .best3 { background: rgba(108, 92, 231, 0.12); font-weight: 600; }
   .name { font-family: 'Segoe UI', Arial, sans-serif; font-weight: 600; }
   h2 { font-size: 18px; margin: 28px 0 12px; }
   .no-print { margin-bottom: 20px; }
@@ -1858,12 +1859,22 @@ function generateReport() {
     html += '</tr></thead><tbody>';
 
     entries.forEach(e => {
-      // Find this entry's best lap
+      // Find best 3 consecutive window start index
+      let b3start = -1;
+      if (e.laps.length >= 3) {
+        let best = Infinity;
+        for (let j = 0; j <= e.laps.length - 3; j++) {
+          const sum = e.laps[j] + e.laps[j + 1] + e.laps[j + 2];
+          if (sum < best) { best = sum; b3start = j; }
+        }
+      }
       html += `<tr><td class="name">${esc(e.name)}</td>`;
       for (let i = 0; i < maxLaps; i++) {
         if (i < e.laps.length) {
           const isBest = e.laps[i] === e.bestLap;
-          html += `<td${isBest ? ' class="best"' : ''}>${formatRaceTime(e.laps[i])}</td>`;
+          const isB3 = (b3start >= 0 && i >= b3start && i < b3start + 3);
+          const cls = isBest ? ' class="best"' : isB3 ? ' class="best3"' : '';
+          html += `<td${cls}>${formatRaceTime(e.laps[i])}</td>`;
         } else {
           html += '<td>—</td>';
         }
@@ -1900,6 +1911,7 @@ function exportRaceExcel() {
   xml += '<Style ss:ID="Header"><Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1"/><Interior ss:Color="#F0F0F0" ss:Pattern="Solid"/></Style>\n';
   xml += '<Style ss:ID="Title"><Font ss:FontName="Calibri" ss:Size="14" ss:Bold="1"/></Style>\n';
   xml += '<Style ss:ID="Best"><Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#00875A"/></Style>\n';
+  xml += '<Style ss:ID="Best3"><Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1"/><Interior ss:Color="#E8E0FF" ss:Pattern="Solid"/></Style>\n';
   xml += '</Styles>\n';
 
   // Sheet 1: Summary
@@ -1936,12 +1948,22 @@ function exportRaceExcel() {
   xml += '</Row>\n';
 
   entries.forEach(e => {
+    let b3start = -1;
+    if (e.laps.length >= 3) {
+      let best = Infinity;
+      for (let j = 0; j <= e.laps.length - 3; j++) {
+        const sum = e.laps[j] + e.laps[j + 1] + e.laps[j + 2];
+        if (sum < best) { best = sum; b3start = j; }
+      }
+    }
     xml += '<Row>';
     xml += `<Cell><Data ss:Type="String">${e.name}</Data></Cell>`;
     for (let i = 0; i < maxLaps; i++) {
       if (i < e.laps.length) {
         const isBest = e.laps[i] === e.bestLap;
-        xml += `<Cell${isBest ? ' ss:StyleID="Best"' : ''}><Data ss:Type="String">${formatRaceTime(e.laps[i])}</Data></Cell>`;
+        const isB3 = (b3start >= 0 && i >= b3start && i < b3start + 3);
+        const style = isBest ? ' ss:StyleID="Best"' : isB3 ? ' ss:StyleID="Best3"' : '';
+        xml += `<Cell${style}><Data ss:Type="String">${formatRaceTime(e.laps[i])}</Data></Cell>`;
       } else {
         xml += '<Cell><Data ss:Type="String">—</Data></Cell>';
       }
