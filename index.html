@@ -336,6 +336,45 @@
       text-align: center; padding: 32px 20px; color: var(--text-dim); font-size: 14px;
     }
 
+    /* ── Countdown / Traffic Light ── */
+    .countdown-overlay {
+      position: fixed; inset: 0; z-index: 20000;
+      background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      animation: fade-in 0.2s ease-out;
+    }
+    .countdown-traffic {
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+      background: #1a1a1a; border-radius: 24px; padding: 32px 28px;
+      border: 3px solid #333; box-shadow: 0 0 60px rgba(0,0,0,0.6);
+    }
+    .countdown-lights {
+      display: flex; gap: 18px;
+    }
+    .countdown-light {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: #222; border: 2px solid #333;
+      transition: all 0.2s;
+    }
+    .countdown-light.red { background: var(--red); box-shadow: 0 0 24px var(--red), 0 0 48px rgba(255,82,82,0.3); border-color: var(--red); }
+    .countdown-light.yellow { background: var(--yellow); box-shadow: 0 0 24px var(--yellow), 0 0 48px rgba(255,215,64,0.3); border-color: var(--yellow); }
+    .countdown-light.green { background: var(--green); box-shadow: 0 0 24px var(--green), 0 0 48px rgba(0,230,118,0.3); border-color: var(--green); }
+    .countdown-number {
+      font-family: var(--mono); font-size: 96px; font-weight: 700;
+      color: #fff; line-height: 1; margin-top: 8px;
+      text-shadow: 0 0 30px rgba(255,255,255,0.3);
+    }
+    .countdown-number.go {
+      color: var(--green); font-size: 72px;
+      text-shadow: 0 0 40px rgba(0,230,118,0.5);
+    }
+    .countdown-cancel {
+      margin-top: 20px; padding: 10px 28px; border-radius: 8px;
+      background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,82,82,0.3);
+      font-size: 15px; font-weight: 600; cursor: pointer; font-family: var(--font);
+    }
+    .countdown-cancel:hover { background: rgba(255,82,82,0.25); }
+
     @media (max-width: 600px) {
       .app { padding: 16px 12px; }
       header { flex-direction: column; align-items: flex-start; }
@@ -410,6 +449,10 @@
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 8a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0Z" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v3l2 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             Подключить
           </button>
+        </div>
+        <div class="field">
+          <label>Мин. круг (сек)</label>
+          <input type="number" id="minLapTime" value="2" min="0.5" max="60" step="0.5">
         </div>
         <div class="field" id="scanBtnWrap" style="display:none;">
           <label>&nbsp;</label>
@@ -592,7 +635,7 @@ const passingsTable = $('passingsTable');
 const emptyState = $('emptyState');
 
 // ── Settings persistence ──
-const SETTINGS_KEYS = ['baudRate', 'dataBits', 'parity'];
+const SETTINGS_KEYS = ['baudRate', 'dataBits', 'parity', 'minLapTime'];
 function loadSettings() {
   const saved = JSON.parse(localStorage.getItem('vrSettings') || '{}');
   SETTINGS_KEYS.forEach(key => {
@@ -1169,7 +1212,7 @@ async function processRegistrationQueue() {
 // ═══════════════════════════════════════
 //  PASSINGS
 // ═══════════════════════════════════════
-const SIGNAL_GAP_MS = 3000; // car must be absent from loop for at least 3s to count as new passing
+function getMinLapMs() { return parseFloat($('minLapTime').value) * 1000 || 2000; }
 const lastRawSignalTime = {}; // transponder → decoder timerValue of latest raw signal (any, including filtered)
 const lastAcceptedTime = {}; // transponder → decoder timerValue of last accepted passing
 
@@ -1182,7 +1225,7 @@ function addPassing(transponder, rawLine, decoderTimerMs) {
     lastAcceptedTime[transponder] = decoderTimerMs;
   } else {
     const gapSinceLastRaw = decoderTimerMs - prevRaw;
-    if (gapSinceLastRaw < SIGNAL_GAP_MS) {
+    if (gapSinceLastRaw < getMinLapMs()) {
       // Car is still on the loop (continuous signals) — ignore
       appendRaw('SKIP', `uid=${transponder} on loop (gap=${gapSinceLastRaw}ms)`);
       return;
@@ -1314,7 +1357,75 @@ function getRaceElapsed() {
   return now - raceStartTime - racePausedTotal;
 }
 
+let countdownCancelled = false;
+
 function startRace() {
+  $('raceStartBtn').disabled = true;
+  countdownCancelled = false;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'countdown-overlay';
+  overlay.innerHTML = `
+    <div class="countdown-traffic">
+      <div class="countdown-lights">
+        <div class="countdown-light" id="cdLight1"></div>
+        <div class="countdown-light" id="cdLight2"></div>
+        <div class="countdown-light" id="cdLight3"></div>
+        <div class="countdown-light" id="cdLight4"></div>
+        <div class="countdown-light" id="cdLight5"></div>
+      </div>
+      <div class="countdown-number" id="cdNumber">5</div>
+      <button class="countdown-cancel" id="cdCancel">Отмена</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('#cdCancel').onclick = () => {
+    countdownCancelled = true;
+    overlay.remove();
+    $('raceStartBtn').disabled = false;
+    showToast('Старт отменён', 'warning');
+  };
+
+  runCountdown(overlay);
+}
+
+async function runCountdown(overlay) {
+  const lights = [
+    overlay.querySelector('#cdLight1'),
+    overlay.querySelector('#cdLight2'),
+    overlay.querySelector('#cdLight3'),
+    overlay.querySelector('#cdLight4'),
+    overlay.querySelector('#cdLight5'),
+  ];
+  const numEl = overlay.querySelector('#cdNumber');
+
+  // 5 → 1: light up red lights one by one with beep
+  for (let i = 5; i >= 1; i--) {
+    if (countdownCancelled) return;
+    numEl.textContent = i;
+    lights[5 - i].classList.add('red');
+    playBeep(440, 120);
+    await sleep(1000);
+  }
+
+  if (countdownCancelled) return;
+
+  // All green + GO
+  lights.forEach(l => { l.classList.remove('red'); l.classList.add('green'); });
+  numEl.textContent = 'GO!';
+  numEl.classList.add('go');
+  playBeep(880, 400);
+
+  // Remove overlay after a short delay
+  await sleep(600);
+  overlay.remove();
+
+  if (countdownCancelled) return;
+  launchRace();
+}
+
+function launchRace() {
   raceActive = true;
   racePaused = false;
   raceFinished = false;
@@ -1325,6 +1436,7 @@ function startRace() {
   raceLapData = {};
 
   $('raceStartBtn').style.display = 'none';
+  $('raceStartBtn').disabled = false;
   $('racePauseBtn').style.display = '';
   $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = '';
@@ -1465,6 +1577,10 @@ function recordRacePassing(transponder, decoderTimerMs) {
   } else {
     const data = raceLapData[transponder];
     const lapTime = decoderTimerMs - data.lastDecoderTime;
+    if (lapTime < getMinLapMs()) {
+      appendRaw('SKIP', `uid=${transponder} lap too short (${lapTime}ms < ${getMinLapMs()}ms)`);
+      return;
+    }
     data.laps.push(lapTime);
     data.lastDecoderTime = decoderTimerMs;
     data.lastPassTime = decoderTimerMs - raceStartDecoderTime;
