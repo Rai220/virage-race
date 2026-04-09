@@ -1626,15 +1626,13 @@ function recordRacePassing(transponder, decoderTimerMs) {
     // Staggered: check if driver's time has expired
     if (staggered) {
       const driverElapsed = decoderTimerMs - data.firstDecoderTime;
-      if (data.timeExpired) {
-        // This was the last lap — finish the driver
+      if (driverElapsed >= durationMs) {
+        // Time is up — this crossing is the finish
+        data.timeExpired = true;
         data.driverFinished = true;
         const name = transponderNames[transponder] || ('Машина #' + transponder);
         appendRaw('RACE', `Driver ${name} (#${transponder}) finished — ${data.laps.length} laps / ${formatRaceTime(data.lastPassTime)}`);
         playBeep(660, 200);
-      } else if (driverElapsed >= durationMs) {
-        data.timeExpired = true;
-        // Don't finish yet — allow one more lap
       }
     }
   }
