@@ -478,9 +478,10 @@
               <option value="staggered">Раздельный старт</option>
             </select>
           </div>
-          <div class="field" id="raceDurationField" style="display:none;">
+          <div class="field" id="raceDurationField">
             <label>Время гонки (мин)</label>
-            <input type="number" id="raceDuration" value="5" min="1" max="60" step="1">
+            <input type="number" id="raceDuration" value="5" min="0" max="60" step="1">
+            <small id="raceDurationHint" style="color:#888;font-size:11px;">0 = без ограничения</small>
           </div>
         </div>
       </div>
@@ -615,6 +616,7 @@ let raceStartDecoderTime = null; // decoder timerValue at race start
 let lastDecoderTimerValue = null; // latest decoder timer value from any packet
 // Per-transponder: { firstDecoderTime, lastDecoderTime, firstPassTime, lastPassTime, laps: [lapTimeMs, ...] }
 let raceLapData = {};
+let massTimeExpired = false;
 
 // ── DOM ──
 const $ = id => document.getElementById(id);
@@ -645,16 +647,31 @@ onRaceModeChange();
 SETTINGS_KEYS.forEach(key => {
   $(key).addEventListener('change', saveSettings);
 });
+$('raceDuration').addEventListener('input', () => {
+  if (!isStaggeredMode()) {
+    $('thStatus').style.display = hasTimedRace() ? '' : 'none';
+  }
+});
 
 function onRaceModeChange() {
   const staggered = $('raceMode').value === 'staggered';
-  $('raceDurationField').style.display = staggered ? '' : 'none';
-  $('thStatus').style.display = staggered ? '' : 'none';
+  $('raceDurationHint').style.display = staggered ? 'none' : '';
+  if (staggered && parseFloat($('raceDuration').value) === 0) {
+    $('raceDuration').value = '5';
+  }
+  $('raceDuration').min = staggered ? '1' : '0';
+  $('thStatus').style.display = hasTimedRace() ? '' : 'none';
   saveSettings();
 }
 
+function hasTimedRace() {
+  return isStaggeredMode() || getRaceDurationMs() > 0;
+}
+
 function getRaceDurationMs() {
-  return (parseFloat($('raceDuration').value) || 5) * 60 * 1000;
+  const val = parseFloat($('raceDuration').value);
+  if (isNaN(val) || val < 0) return 5 * 60 * 1000;
+  return val * 60 * 1000;
 }
 
 function isStaggeredMode() {
@@ -1448,6 +1465,8 @@ function launchRace() {
   $('raceStartBtn').disabled = false;
   $('raceSettings').style.display = 'none';
   const staggered = isStaggeredMode();
+  const timed = hasTimedRace();
+  massTimeExpired = false;
   $('racePauseBtn').style.display = staggered ? 'none' : '';
   $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = '';
@@ -1457,7 +1476,7 @@ function launchRace() {
   $('raceResults').style.display = '';
   $('raceEmpty').style.display = '';
   $('raceResultsBody').innerHTML = '';
-  $('thStatus').style.display = staggered ? '' : 'none';
+  $('thStatus').style.display = timed ? '' : 'none';
 
   const timerEl = $('raceTimer');
   timerEl.classList.remove('stopped');
@@ -1468,9 +1487,10 @@ function launchRace() {
 
   raceTimerInterval = setInterval(() => {
     if (!raceStartTime || racePaused) return;
-    timerEl.textContent = formatRaceTime(getRaceElapsed());
-    if (staggered) {
-      checkStaggeredFinish();
+    const elapsed = getRaceElapsed();
+    timerEl.textContent = formatRaceTime(elapsed);
+    if (timed) {
+      checkTimedFinish();
       if (!launchRace._lastRender || Date.now() - launchRace._lastRender > 500) {
         launchRace._lastRender = Date.now();
         if (Object.keys(raceLapData).length > 0) renderRaceResults();
@@ -1478,8 +1498,12 @@ function launchRace() {
     }
   }, 47);
 
-  showToast(staggered ? 'Раздельный старт! Проведите машинки мимо рамки для начала отсчёта.' : 'Гонка началась!', 'success', 7000);
-  appendRaw('RACE', staggered ? 'Start (staggered)' : 'Start');
+  let startMsg;
+  if (staggered) startMsg = 'Раздельный старт! Проведите машинки мимо рамки для начала отсчёта.';
+  else if (timed) startMsg = `Гонка началась! Время: ${$('raceDuration').value} мин`;
+  else startMsg = 'Гонка началась!';
+  showToast(startMsg, 'success', 7000);
+  appendRaw('RACE', staggered ? 'Start (staggered)' : timed ? `Start (timed ${$('raceDuration').value}min)` : 'Start');
 }
 
 function pauseRace() {
@@ -1561,6 +1585,7 @@ function resetRace() {
   racePausedTotal = 0;
   racePauseStart = null;
   raceLapData = {};
+  massTimeExpired = false;
   clearInterval(raceTimerInterval);
   raceTimerInterval = null;
 
@@ -1588,9 +1613,15 @@ function recordRacePassing(transponder, decoderTimerMs) {
   if (!raceActive || !raceStartTime || racePaused) return;
 
   const staggered = isStaggeredMode();
+  const timed = hasTimedRace();
   const durationMs = getRaceDurationMs();
 
   if (!raceLapData[transponder]) {
+    // In mass start with time expired, reject new drivers
+    if (!staggered && massTimeExpired) {
+      appendRaw('SKIP', `uid=${transponder} race time expired, new driver rejected`);
+      return;
+    }
     raceLapData[transponder] = {
       firstDecoderTime: decoderTimerMs,
       lastDecoderTime: decoderTimerMs,
@@ -1607,8 +1638,8 @@ function recordRacePassing(transponder, decoderTimerMs) {
   } else {
     const data = raceLapData[transponder];
 
-    // In staggered mode, reject passings if driver is finished
-    if (staggered && data.driverFinished) {
+    // Reject passings if driver is already finished
+    if (data.driverFinished) {
       appendRaw('SKIP', `uid=${transponder} already finished`);
       return;
     }
@@ -1623,11 +1654,16 @@ function recordRacePassing(transponder, decoderTimerMs) {
     data.lastDecoderTime = decoderTimerMs;
     data.lastPassTime = decoderTimerMs - raceStartDecoderTime;
 
-    // Staggered: check if driver's time has expired
-    if (staggered) {
-      const driverElapsed = decoderTimerMs - data.firstDecoderTime;
-      if (driverElapsed >= durationMs) {
-        // Time is up — this crossing is the finish
+    // Check if driver's time has expired
+    if (timed) {
+      let timeUp = false;
+      if (staggered) {
+        const driverElapsed = decoderTimerMs - data.firstDecoderTime;
+        timeUp = driverElapsed >= durationMs;
+      } else {
+        timeUp = data.timeExpired || massTimeExpired;
+      }
+      if (timeUp) {
         data.timeExpired = true;
         data.driverFinished = true;
         const name = transponderNames[transponder] || ('Машина #' + transponder);
@@ -1641,32 +1677,63 @@ function recordRacePassing(transponder, decoderTimerMs) {
   renderRaceResults();
 }
 
-function checkStaggeredFinish() {
-  if (!raceActive || !isStaggeredMode()) return;
+function checkTimedFinish() {
+  if (!raceActive || !hasTimedRace()) return;
+  const durationMs = getRaceDurationMs();
+  const staggered = isStaggeredMode();
+
+  // Mass start: check global time expiry
+  if (!staggered && !massTimeExpired) {
+    const elapsed = getRaceElapsed();
+    if (elapsed >= durationMs) {
+      massTimeExpired = true;
+      // Mark all existing drivers as timeExpired (last lap mode)
+      Object.entries(raceLapData).forEach(([tid, data]) => {
+        if (!data.driverFinished) {
+          data.timeExpired = true;
+        }
+      });
+      $('raceStatusLabel').textContent = 'Время вышло — последний круг';
+      $('raceStatusLabel').className = 'race-status-label active';
+      showToast('Время вышло! Участники завершают последний круг.', 'info', 5000);
+      appendRaw('RACE', `Time expired (${formatRaceTime(durationMs)}) — last lap for all`);
+      playBeep(880, 400);
+    }
+  }
+
   const entries = Object.entries(raceLapData);
   if (entries.length === 0) return;
   const allFinished = entries.every(([, data]) => data.driverFinished);
   if (allFinished) {
-    // Update status label
     $('raceStatusLabel').textContent = 'Все участники финишировали';
   }
 }
 
 function getDriverStatus(data) {
-  if (!isStaggeredMode()) return null;
+  if (!hasTimedRace()) return null;
   if (data.driverFinished) return 'finished';
+  if (data.timeExpired || massTimeExpired) return 'last-lap';
+  const staggered = isStaggeredMode();
   const durationMs = getRaceDurationMs();
-  const elapsed = (lastDecoderTimerValue || 0) - data.firstDecoderTime;
-  if (data.timeExpired) return 'last-lap';
-  if (elapsed >= durationMs) return 'last-lap';
+  if (staggered) {
+    const elapsed = (lastDecoderTimerValue || 0) - data.firstDecoderTime;
+    if (elapsed >= durationMs) return 'last-lap';
+  } else {
+    if (getRaceElapsed() >= durationMs) return 'last-lap';
+  }
   return 'racing';
 }
 
 function getDriverRemainingMs(data) {
-  if (!isStaggeredMode() || data.driverFinished) return 0;
+  if (!hasTimedRace() || data.driverFinished) return 0;
   const durationMs = getRaceDurationMs();
-  const elapsed = (lastDecoderTimerValue || 0) - data.firstDecoderTime;
-  return Math.max(0, durationMs - elapsed);
+  const staggered = isStaggeredMode();
+  if (staggered) {
+    const elapsed = (lastDecoderTimerValue || 0) - data.firstDecoderTime;
+    return Math.max(0, durationMs - elapsed);
+  } else {
+    return Math.max(0, durationMs - getRaceElapsed());
+  }
 }
 
 function best3consecutive(laps) {
@@ -1698,10 +1765,10 @@ function renderRaceResults() {
     const b3c = best3consecutive(data.laps);
     const totalTime = data.lastPassTime;
 
-    const staggered = isStaggeredMode();
+    const timed = hasTimedRace();
     const status = getDriverStatus(data);
     let statusHtml = '';
-    if (staggered) {
+    if (timed) {
       if (status === 'finished') {
         statusHtml = '<td><span class="driver-status finished">Финиш</span></td>';
       } else if (status === 'last-lap') {
@@ -1798,7 +1865,7 @@ function generateReport() {
   </button>
 </div>
 <h1>Virage Race — Результаты гонки</h1>
-<p class="meta">${date} &nbsp;|&nbsp; ${time} &nbsp;|&nbsp; ${isStaggeredMode() ? 'Раздельный старт (' + $('raceDuration').value + ' мин)' : 'Массовый старт'} &nbsp;|&nbsp; Время: ${esc(raceTime)} &nbsp;|&nbsp; Участников: ${entries.length}</p>
+<p class="meta">${date} &nbsp;|&nbsp; ${time} &nbsp;|&nbsp; ${isStaggeredMode() ? 'Раздельный старт (' + $('raceDuration').value + ' мин)' : (getRaceDurationMs() > 0 ? 'Массовый старт (' + $('raceDuration').value + ' мин)' : 'Массовый старт')} &nbsp;|&nbsp; Время: ${esc(raceTime)} &nbsp;|&nbsp; Участников: ${entries.length}</p>
 
 <h2>Итоговая таблица</h2>
 <table>
