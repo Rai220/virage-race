@@ -336,6 +336,13 @@
       text-align: center; padding: 32px 20px; color: var(--text-dim); font-size: 14px;
     }
 
+    /* ── Driver Status ── */
+    .driver-status { font-family: var(--font); font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; }
+    .driver-status.racing { background: var(--green-dim); color: var(--green); }
+    .driver-status.last-lap { background: rgba(255,215,64,0.15); color: var(--yellow); }
+    .driver-status.finished { background: var(--red-dim); color: var(--red); }
+    .driver-status.waiting { background: var(--surface2); color: var(--text-dim); }
+
     /* ── Countdown / Traffic Light ── */
     .countdown-overlay {
       position: fixed; inset: 0; z-index: 20000;
@@ -491,6 +498,21 @@
 
     <div class="race-panel" id="racePanel">
       <div class="card-title">Гонка</div>
+      <div class="race-settings" id="raceSettings">
+        <div class="controls" style="margin-bottom:16px;">
+          <div class="field">
+            <label>Режим старта</label>
+            <select id="raceMode" onchange="onRaceModeChange()">
+              <option value="mass">Массовый старт</option>
+              <option value="staggered">Раздельный старт</option>
+            </select>
+          </div>
+          <div class="field" id="raceDurationField" style="display:none;">
+            <label>Время гонки (мин)</label>
+            <input type="number" id="raceDuration" value="5" min="1" max="60" step="1">
+          </div>
+        </div>
+      </div>
       <div class="race-header">
         <div>
           <div class="race-timer" id="raceTimer">00:00.000</div>
@@ -530,7 +552,9 @@
               <th>Последний круг</th>
               <th>Лучший круг</th>
               <th>Средний круг</th>
+              <th>3 лучших подряд</th>
               <th>Общее время</th>
+              <th id="thStatus" style="display:none;">Статус</th>
             </tr>
           </thead>
           <tbody id="raceResultsBody"></tbody>
@@ -633,7 +657,7 @@ const passingsTable = $('passingsTable');
 const emptyState = $('emptyState');
 
 // ── Settings persistence ──
-const SETTINGS_KEYS = ['baudRate', 'dataBits', 'parity', 'minLapTime'];
+const SETTINGS_KEYS = ['baudRate', 'dataBits', 'parity', 'minLapTime', 'raceMode', 'raceDuration'];
 function loadSettings() {
   const saved = JSON.parse(localStorage.getItem('vrSettings') || '{}');
   SETTINGS_KEYS.forEach(key => {
@@ -646,9 +670,25 @@ function saveSettings() {
   localStorage.setItem('vrSettings', JSON.stringify(settings));
 }
 loadSettings();
+onRaceModeChange();
 SETTINGS_KEYS.forEach(key => {
   $(key).addEventListener('change', saveSettings);
 });
+
+function onRaceModeChange() {
+  const staggered = $('raceMode').value === 'staggered';
+  $('raceDurationField').style.display = staggered ? '' : 'none';
+  $('thStatus').style.display = staggered ? '' : 'none';
+  saveSettings();
+}
+
+function getRaceDurationMs() {
+  return (parseFloat($('raceDuration').value) || 5) * 60 * 1000;
+}
+
+function isStaggeredMode() {
+  return $('raceMode').value === 'staggered';
+}
 
 // ── API Check ──
 const hasWebHID = !!navigator.hid;
@@ -1435,7 +1475,9 @@ function launchRace() {
 
   $('raceStartBtn').style.display = 'none';
   $('raceStartBtn').disabled = false;
-  $('racePauseBtn').style.display = '';
+  $('raceSettings').style.display = 'none';
+  const staggered = isStaggeredMode();
+  $('racePauseBtn').style.display = staggered ? 'none' : '';
   $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = '';
   $('raceResetBtn').style.display = 'none';
@@ -1444,21 +1486,29 @@ function launchRace() {
   $('raceResults').style.display = '';
   $('raceEmpty').style.display = '';
   $('raceResultsBody').innerHTML = '';
+  $('thStatus').style.display = staggered ? '' : 'none';
 
   const timerEl = $('raceTimer');
   timerEl.classList.remove('stopped');
   timerEl.classList.remove('paused');
   const label = $('raceStatusLabel');
-  label.textContent = 'Гонка идёт';
+  label.textContent = staggered ? 'Раздельный старт — ожидание участников' : 'Гонка идёт';
   label.className = 'race-status-label active';
 
   raceTimerInterval = setInterval(() => {
     if (!raceStartTime || racePaused) return;
     timerEl.textContent = formatRaceTime(getRaceElapsed());
+    if (staggered) {
+      checkStaggeredFinish();
+      if (!launchRace._lastRender || Date.now() - launchRace._lastRender > 500) {
+        launchRace._lastRender = Date.now();
+        if (Object.keys(raceLapData).length > 0) renderRaceResults();
+      }
+    }
   }, 47);
 
-  showToast('Гонка началась!', 'success');
-  appendRaw('RACE', 'Start');
+  showToast(staggered ? 'Раздельный старт! Проведите машинки мимо рамки для начала отсчёта.' : 'Гонка началась!', 'success', 7000);
+  appendRaw('RACE', staggered ? 'Start (staggered)' : 'Start');
 }
 
 function pauseRace() {
@@ -1551,6 +1601,7 @@ function resetRace() {
   label.className = 'race-status-label idle';
 
   $('raceStartBtn').style.display = '';
+  $('raceSettings').style.display = '';
   $('racePauseBtn').style.display = 'none';
   $('raceResumeBtn').style.display = 'none';
   $('raceStopBtn').style.display = 'none';
@@ -1559,10 +1610,14 @@ function resetRace() {
   $('raceExcelBtn').style.display = 'none';
   $('raceResults').style.display = 'none';
   $('raceResultsBody').innerHTML = '';
+  onRaceModeChange();
 }
 
 function recordRacePassing(transponder, decoderTimerMs) {
   if (!raceActive || !raceStartTime || racePaused) return;
+
+  const staggered = isStaggeredMode();
+  const durationMs = getRaceDurationMs();
 
   if (!raceLapData[transponder]) {
     raceLapData[transponder] = {
@@ -1570,22 +1625,89 @@ function recordRacePassing(transponder, decoderTimerMs) {
       lastDecoderTime: decoderTimerMs,
       firstPassTime: decoderTimerMs - raceStartDecoderTime,
       lastPassTime: decoderTimerMs - raceStartDecoderTime,
-      laps: []
+      laps: [],
+      driverFinished: false,
+      timeExpired: false
     };
+    if (staggered) {
+      const name = transponderNames[transponder] || ('Машина #' + transponder);
+      appendRaw('RACE', `Driver ${name} (#${transponder}) started — ${formatRaceTime(durationMs)} individual timer`);
+    }
   } else {
     const data = raceLapData[transponder];
+
+    // In staggered mode, reject passings if driver is finished
+    if (staggered && data.driverFinished) {
+      appendRaw('SKIP', `uid=${transponder} already finished`);
+      return;
+    }
+
     const lapTime = decoderTimerMs - data.lastDecoderTime;
     if (lapTime < getMinLapMs()) {
       appendRaw('SKIP', `uid=${transponder} lap too short (${lapTime}ms < ${getMinLapMs()}ms)`);
       return;
     }
+
     data.laps.push(lapTime);
     data.lastDecoderTime = decoderTimerMs;
     data.lastPassTime = decoderTimerMs - raceStartDecoderTime;
+
+    // Staggered: check if driver's time has expired
+    if (staggered) {
+      const driverElapsed = decoderTimerMs - data.firstDecoderTime;
+      if (data.timeExpired) {
+        // This was the last lap — finish the driver
+        data.driverFinished = true;
+        const name = transponderNames[transponder] || ('Машина #' + transponder);
+        appendRaw('RACE', `Driver ${name} (#${transponder}) finished — ${data.laps.length} laps / ${formatRaceTime(data.lastPassTime)}`);
+        playBeep(660, 200);
+      } else if (driverElapsed >= durationMs) {
+        data.timeExpired = true;
+        // Don't finish yet — allow one more lap
+      }
+    }
   }
 
   $('raceEmpty').style.display = 'none';
   renderRaceResults();
+}
+
+function checkStaggeredFinish() {
+  if (!raceActive || !isStaggeredMode()) return;
+  const entries = Object.entries(raceLapData);
+  if (entries.length === 0) return;
+  const allFinished = entries.every(([, data]) => data.driverFinished);
+  if (allFinished) {
+    // Update status label
+    $('raceStatusLabel').textContent = 'Все участники финишировали';
+  }
+}
+
+function getDriverStatus(data) {
+  if (!isStaggeredMode()) return null;
+  if (data.driverFinished) return 'finished';
+  const durationMs = getRaceDurationMs();
+  const elapsed = (lastDecoderTimerValue || 0) - data.firstDecoderTime;
+  if (data.timeExpired) return 'last-lap';
+  if (elapsed >= durationMs) return 'last-lap';
+  return 'racing';
+}
+
+function getDriverRemainingMs(data) {
+  if (!isStaggeredMode() || data.driverFinished) return 0;
+  const durationMs = getRaceDurationMs();
+  const elapsed = (lastDecoderTimerValue || 0) - data.firstDecoderTime;
+  return Math.max(0, durationMs - elapsed);
+}
+
+function best3consecutive(laps) {
+  if (laps.length < 3) return null;
+  let best = Infinity;
+  for (let i = 0; i <= laps.length - 3; i++) {
+    const sum = laps[i] + laps[i + 1] + laps[i + 2];
+    if (sum < best) best = sum;
+  }
+  return best;
 }
 
 function renderRaceResults() {
@@ -1604,7 +1726,22 @@ function renderRaceResults() {
     const lastLap = lapsCount > 0 ? data.laps[lapsCount - 1] : null;
     const bestLap = lapsCount > 0 ? Math.min(...data.laps) : null;
     const avgLap = lapsCount > 0 ? data.laps.reduce((s, v) => s + v, 0) / lapsCount : null;
+    const b3c = best3consecutive(data.laps);
     const totalTime = data.lastPassTime;
+
+    const staggered = isStaggeredMode();
+    const status = getDriverStatus(data);
+    let statusHtml = '';
+    if (staggered) {
+      if (status === 'finished') {
+        statusHtml = '<td><span class="driver-status finished">Финиш</span></td>';
+      } else if (status === 'last-lap') {
+        statusHtml = '<td><span class="driver-status last-lap">Посл. круг</span></td>';
+      } else {
+        const rem = getDriverRemainingMs(data);
+        statusHtml = `<td><span class="driver-status racing">${formatRaceTime(rem)}</span></td>`;
+      }
+    }
 
     const row = document.createElement('tr');
     row.innerHTML =
@@ -1614,7 +1751,9 @@ function renderRaceResults() {
       `<td>${lastLap !== null ? formatRaceTime(lastLap) : '—'}</td>` +
       `<td class="${bestLap !== null ? 'best-lap' : ''}">${bestLap !== null ? formatRaceTime(bestLap) : '—'}</td>` +
       `<td>${avgLap !== null ? formatRaceTime(Math.round(avgLap)) : '—'}</td>` +
-      `<td>${formatRaceTime(totalTime)}</td>`;
+      `<td>${b3c !== null ? formatRaceTime(b3c) : '—'}</td>` +
+      `<td>${formatRaceTime(totalTime)}</td>` +
+      statusHtml;
     body.appendChild(row);
   });
 
@@ -1634,7 +1773,9 @@ function getRaceSortedEntries() {
     const lapsCount = data.laps.length;
     const bestLap = lapsCount > 0 ? Math.min(...data.laps) : null;
     const avgLap = lapsCount > 0 ? data.laps.reduce((s, v) => s + v, 0) / lapsCount : null;
-    return { pos: idx + 1, tid, name, lapsCount, laps: data.laps, bestLap, avgLap, totalTime: data.lastPassTime };
+    const b3c = best3consecutive(data.laps);
+    const driverFinished = data.driverFinished || false;
+    return { pos: idx + 1, tid, name, lapsCount, laps: data.laps, bestLap, avgLap, best3: b3c, totalTime: data.lastPassTime, driverFinished };
   });
 }
 
@@ -1687,12 +1828,12 @@ function generateReport() {
   </button>
 </div>
 <h1>Virage Race — Результаты гонки</h1>
-<p class="meta">${date} &nbsp;|&nbsp; ${time} &nbsp;|&nbsp; Время гонки: ${esc(raceTime)} &nbsp;|&nbsp; Участников: ${entries.length}</p>
+<p class="meta">${date} &nbsp;|&nbsp; ${time} &nbsp;|&nbsp; ${isStaggeredMode() ? 'Раздельный старт (' + $('raceDuration').value + ' мин)' : 'Массовый старт'} &nbsp;|&nbsp; Время: ${esc(raceTime)} &nbsp;|&nbsp; Участников: ${entries.length}</p>
 
 <h2>Итоговая таблица</h2>
 <table>
 <thead><tr>
-  <th>Поз.</th><th>Участник</th><th>ID</th><th>Круги</th><th>Лучший круг</th><th>Средний круг</th><th>Общее время</th>
+  <th>Поз.</th><th>Участник</th><th>ID</th><th>Круги</th><th>Лучший круг</th><th>Средний круг</th><th>3 лучших подряд</th><th>Общее время</th>
 </tr></thead><tbody>`;
 
   entries.forEach(e => {
@@ -1704,6 +1845,7 @@ function generateReport() {
       <td>${e.lapsCount}</td>
       <td${e.bestLap !== null ? ' class="best"' : ''}>${e.bestLap !== null ? formatRaceTime(e.bestLap) : '—'}</td>
       <td>${e.avgLap !== null ? formatRaceTime(Math.round(e.avgLap)) : '—'}</td>
+      <td>${e.best3 !== null ? formatRaceTime(e.best3) : '—'}</td>
       <td>${formatRaceTime(e.totalTime)}</td>
     </tr>`;
   });
@@ -1767,7 +1909,7 @@ function exportRaceExcel() {
   xml += '<Row></Row>\n';
   // Header
   xml += '<Row>';
-  ['Поз.', 'Участник', 'ID', 'Круги', 'Лучший круг', 'Средний круг', 'Общее время'].forEach(h => {
+  ['Поз.', 'Участник', 'ID', 'Круги', 'Лучший круг', 'Средний круг', '3 лучших подряд', 'Общее время'].forEach(h => {
     xml += `<Cell ss:StyleID="Header"><Data ss:Type="String">${h}</Data></Cell>`;
   });
   xml += '</Row>\n';
@@ -1780,6 +1922,7 @@ function exportRaceExcel() {
     xml += `<Cell><Data ss:Type="Number">${e.lapsCount}</Data></Cell>`;
     xml += `<Cell${e.bestLap !== null ? ' ss:StyleID="Best"' : ''}><Data ss:Type="String">${e.bestLap !== null ? formatRaceTime(e.bestLap) : '—'}</Data></Cell>`;
     xml += `<Cell><Data ss:Type="String">${e.avgLap !== null ? formatRaceTime(Math.round(e.avgLap)) : '—'}</Data></Cell>`;
+    xml += `<Cell><Data ss:Type="String">${e.best3 !== null ? formatRaceTime(e.best3) : '—'}</Data></Cell>`;
     xml += `<Cell><Data ss:Type="String">${formatRaceTime(e.totalTime)}</Data></Cell>`;
     xml += '</Row>\n';
   });
