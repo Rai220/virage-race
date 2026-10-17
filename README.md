@@ -2,6 +2,8 @@
 
 Single-page WebHID app for reading RC transponder passings from CP2110-based decoders (EasyLAP / Robitronic) and displaying live race stats.
 
+![Virage Race interface](screenshot.png)
+
 ## What it does
 
 - Connects to a CP2110 HID-UART device directly from the browser (no desktop app).
@@ -10,6 +12,20 @@ Single-page WebHID app for reading RC transponder passings from CP2110-based dec
 - Calculates lap metrics per transponder (laps count, last lap, best lap, average lap, total time).
 - Stores transponder names in browser local storage.
 - Includes raw log and hex dump views for diagnostics.
+
+## Supported devices
+
+| Модель | Совместимость | Что это |
+|---|---|---|
+| EasyLap ET005 (Mini-USB) | ✅ Поддерживается | Предыдущее поколение USB-контроллера |
+| EasyLap ET005 (USB-C) | ✅ Поддерживается | Современная версия контроллера |
+| EasyLap EZL01 | ✅ Поддерживается | Полный комплект: контроллер и 4 ИК-приёмника |
+| EasyLap EZL02 | ✅ Поддерживается | Комплект с 4 приёмниками и 4 транспондерами |
+
+<p>
+  <img src="docs/easylap-et005.png" alt="EasyLap ET005 controller" width="300">
+  <img src="docs/easylap-ezl01.png" alt="EasyLap EZL01 kit" width="420">
+</p>
 
 ## Requirements
 
@@ -34,6 +50,8 @@ If direct file opening is restricted in your environment, serve the folder with 
 ## Project structure
 
 - `index.html` - complete application UI and logic.
+- `screenshot.png` - interface screenshot used in this README.
+- `docs/` - device photos used in this README.
 
 ## Notes
 
