@@ -1,5 +1,7 @@
 # Virage Race
 
+English | [Русский](README.ru.md)
+
 Single-page WebHID app for reading RC transponder passings from CP2110-based decoders (EasyLAP / Robitronic) and displaying live race stats.
 
 ![Virage Race interface](screenshot.png)
@@ -15,12 +17,12 @@ Single-page WebHID app for reading RC transponder passings from CP2110-based dec
 
 ## Supported devices
 
-| Модель | Совместимость | Что это |
+| Model | Compatibility | Description |
 |---|---|---|
-| EasyLap ET005 (Mini-USB) | ✅ Поддерживается | Предыдущее поколение USB-контроллера |
-| EasyLap ET005 (USB-C) | ✅ Поддерживается | Современная версия контроллера |
-| EasyLap EZL01 | ✅ Поддерживается | Полный комплект: контроллер и 4 ИК-приёмника |
-| EasyLap EZL02 | ✅ Поддерживается | Комплект с 4 приёмниками и 4 транспондерами |
+| EasyLap ET005 (Mini-USB) | ✅ Supported | Previous generation USB controller |
+| EasyLap ET005 (USB-C) | ✅ Supported | Current version of the controller |
+| EasyLap EZL01 | ✅ Supported | Full kit: controller and 4 IR receivers |
+| EasyLap EZL02 | ✅ Supported | Kit with 4 receivers and 4 transponders |
 
 <p>
   <img src="docs/easylap-et005.png" alt="EasyLap ET005 controller" width="300">
