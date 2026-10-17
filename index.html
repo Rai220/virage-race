@@ -238,6 +238,15 @@
     }
     .modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .modal-suggest-label { font-size: 12px; color: var(--text-dim); margin: -8px 0 8px; }
+    .modal-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .suggest-chip {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    }
+    .suggest-chip:hover { border-color: var(--accent); background: var(--accent-glow); }
+    .modal-actions .btn-danger { margin-right: auto; }
 
     /* ── Participants list modal ── */
     .participants-list { max-height: 340px; overflow-y: auto; margin-bottom: 16px; }
@@ -601,6 +610,8 @@ let hexOffset = 0;
 let allReceivedBytes = []; // for hex dump
 let scanCollectedBytes = [];
 let transponderNames = JSON.parse(localStorage.getItem('vrTransponderNames') || '{}');
+// History of names ever used per transponder: { tid: [name, ...] } (most recent first)
+let transponderHistory = JSON.parse(localStorage.getItem('vrTransponderHistory') || '{}');
 let pendingPassings = [];
 let registrationInProgress = false;
 
@@ -1129,6 +1140,30 @@ function saveTransponderNames() {
   localStorage.setItem('vrTransponderNames', JSON.stringify(transponderNames));
 }
 
+function saveTransponderHistory() {
+  localStorage.setItem('vrTransponderHistory', JSON.stringify(transponderHistory));
+}
+
+function rememberTransponderName(tid, name) {
+  if (!name) return;
+  const list = (transponderHistory[tid] || []).filter(n => n !== name);
+  list.unshift(name);
+  transponderHistory[tid] = list.slice(0, 10);
+  saveTransponderHistory();
+}
+
+// Seed history with names that were registered before history tracking existed
+Object.entries(transponderNames).forEach(([tid, name]) => {
+  if (!(transponderHistory[tid] || []).includes(name)) rememberTransponderName(tid, name);
+});
+
+function allKnownNames() {
+  const set = new Set();
+  Object.values(transponderHistory).forEach(list => list.forEach(n => set.add(n)));
+  Object.values(transponderNames).forEach(n => set.add(n));
+  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
 function showParticipantsModal() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -1153,12 +1188,23 @@ function showParticipantsModal() {
         <div class="modal-sub">Зарегистрировано: ${entries.length}</div>
         <div class="participants-list">${listHtml}</div>
         <div class="modal-actions">
+          ${entries.length > 0 ? '<button class="btn-danger" id="participantsDeleteAllBtn">Удалить всех</button>' : ''}
           <button class="btn-primary" id="participantsCloseBtn">Закрыть</button>
         </div>
       </div>
     `;
 
     overlay.querySelector('#participantsCloseBtn').onclick = () => overlay.remove();
+    const deleteAllBtn = overlay.querySelector('#participantsDeleteAllBtn');
+    if (deleteAllBtn) {
+      deleteAllBtn.onclick = () => {
+        if (!confirm(`Удалить всех участников (${entries.length})? Имена останутся в подсказках при следующей регистрации.`)) return;
+        transponderNames = {};
+        saveTransponderNames();
+        render();
+        showToast('Все участники удалены', 'info');
+      };
+    }
     overlay.querySelectorAll('.btn-delete').forEach(btn => {
       btn.onclick = () => {
         const tid = btn.dataset.tid;
@@ -1176,13 +1222,19 @@ function showParticipantsModal() {
 
 function showRegistrationModal(transponder) {
   return new Promise((resolve) => {
+    const previous = transponderHistory[transponder] || [];
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
       <div class="modal">
         <div class="modal-title">Новый участник</div>
         <div class="modal-sub">Транспондер <span class="tid">#${esc(transponder)}</span> обнаружен впервые.<br>Введите имя участника:</div>
-        <input class="modal-input" id="regNameInput" type="text" placeholder="Имя участника" autocomplete="off" autofocus>
+        <input class="modal-input" id="regNameInput" type="text" placeholder="Имя участника" autocomplete="off" list="regNameList" autofocus>
+        <datalist id="regNameList">${allKnownNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+        ${previous.length > 0 ? `
+          <div class="modal-suggest-label">Раньше этим чипом пользовались:</div>
+          <div class="modal-suggest">${previous.map(n => `<button type="button" class="suggest-chip" data-name="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+        ` : ''}
         <div class="modal-actions">
           <button class="btn-secondary" id="regSkipBtn">Пропустить</button>
           <button class="btn-primary" id="regSaveBtn">Сохранить</button>
@@ -1199,6 +1251,10 @@ function showRegistrationModal(transponder) {
       overlay.remove();
       resolve(name);
     }
+
+    overlay.querySelectorAll('.suggest-chip').forEach(chip => {
+      chip.onclick = () => finish(chip.dataset.name);
+    });
 
     saveBtn.onclick = () => {
       const name = input.value.trim();
@@ -1225,6 +1281,7 @@ async function processRegistrationQueue() {
       const name = await showRegistrationModal(item.transponder);
       transponderNames[item.transponder] = name || ('Машина #' + item.transponder);
       saveTransponderNames();
+      if (name) rememberTransponderName(item.transponder, name);
       showToast(`Участник зарегистрирован: ${transponderNames[item.transponder]}`, 'success');
     }
 
