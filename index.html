@@ -258,11 +258,15 @@
     .participant-item-info { display: flex; flex-direction: column; min-width: 0; }
     .participant-item-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .participant-item-tid { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
-    .participant-item .btn-delete {
-      flex-shrink: 0; background: var(--red-dim); color: var(--red); border: none;
+    .participant-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .participant-item .btn-delete, .participant-item .btn-rename {
+      flex-shrink: 0; border: none;
       border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600;
       cursor: pointer; transition: background 0.15s;
     }
+    .participant-item .btn-rename { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .participant-item .btn-rename:hover { border-color: var(--accent); background: var(--accent-glow); }
+    .participant-item .btn-delete { background: var(--red-dim); color: var(--red); }
     .participant-item .btn-delete:hover { background: var(--red); color: #fff; }
     .participants-empty { color: var(--text-dim); font-size: 13px; text-align: center; padding: 24px 0; }
 
@@ -1178,7 +1182,10 @@ function showParticipantsModal() {
               <div class="participant-item-name">${esc(name)}</div>
               <div class="participant-item-tid">#${esc(tid)}</div>
             </div>
-            <button class="btn-delete" data-tid="${esc(tid)}">Удалить</button>
+            <div class="participant-item-actions">
+              <button class="btn-rename" data-tid="${esc(tid)}">Переименовать</button>
+              <button class="btn-delete" data-tid="${esc(tid)}">Удалить</button>
+            </div>
           </div>
         `).join('');
 
@@ -1205,6 +1212,19 @@ function showParticipantsModal() {
         showToast('Все участники удалены', 'info');
       };
     }
+    overlay.querySelectorAll('.btn-rename').forEach(btn => {
+      btn.onclick = async () => {
+        const tid = btn.dataset.tid;
+        const name = await showRegistrationModal(tid, { title: 'Переименовать участника', current: transponderNames[tid] });
+        if (!name || name === transponderNames[tid]) return;
+        transponderNames[tid] = name;
+        saveTransponderNames();
+        rememberTransponderName(tid, name);
+        render();
+        applyRenamedName(tid, name);
+        showToast(`Участник переименован: ${name}`, 'success');
+      };
+    });
     overlay.querySelectorAll('.btn-delete').forEach(btn => {
       btn.onclick = () => {
         const tid = btn.dataset.tid;
@@ -1220,23 +1240,39 @@ function showParticipantsModal() {
   document.body.appendChild(overlay);
 }
 
-function showRegistrationModal(transponder) {
+// Refresh already-rendered passings and race results after a rename
+function applyRenamedName(tid, name) {
+  passings.forEach(p => { if (p.transponder === tid) p.name = name; });
+  passingsBody.querySelectorAll('tr').forEach(row => {
+    const idCell = row.querySelector('.transponder-id');
+    if (idCell && idCell.textContent === tid) {
+      const span = row.querySelector('.participant-name');
+      if (span) span.innerHTML = `${esc(name)} <span class="tid-small">#${esc(tid)}</span>`;
+    }
+  });
+  if (Object.keys(raceLapData).length > 0) renderRaceResults();
+}
+
+function showRegistrationModal(transponder, opts = {}) {
   return new Promise((resolve) => {
-    const previous = transponderHistory[transponder] || [];
+    const isRename = !!opts.current;
+    const previous = (transponderHistory[transponder] || []).filter(n => n !== opts.current);
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
       <div class="modal">
-        <div class="modal-title">Новый участник</div>
-        <div class="modal-sub">Транспондер <span class="tid">#${esc(transponder)}</span> обнаружен впервые.<br>Введите имя участника:</div>
-        <input class="modal-input" id="regNameInput" type="text" placeholder="Имя участника" autocomplete="off" list="regNameList" autofocus>
+        <div class="modal-title">${isRename ? esc(opts.title) : 'Новый участник'}</div>
+        <div class="modal-sub">${isRename
+          ? `Транспондер <span class="tid">#${esc(transponder)}</span>, сейчас: <b>${esc(opts.current)}</b>.<br>Введите новое имя:`
+          : `Транспондер <span class="tid">#${esc(transponder)}</span> обнаружен впервые.<br>Введите имя участника:`}</div>
+        <input class="modal-input" id="regNameInput" type="text" placeholder="Имя участника" value="${isRename ? esc(opts.current) : ''}" autocomplete="off" list="regNameList" autofocus>
         <datalist id="regNameList">${allKnownNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
         ${previous.length > 0 ? `
           <div class="modal-suggest-label">Раньше этим чипом пользовались:</div>
           <div class="modal-suggest">${previous.map(n => `<button type="button" class="suggest-chip" data-name="${esc(n)}">${esc(n)}</button>`).join('')}</div>
         ` : ''}
         <div class="modal-actions">
-          <button class="btn-secondary" id="regSkipBtn">Пропустить</button>
+          <button class="btn-secondary" id="regSkipBtn">${isRename ? 'Отмена' : 'Пропустить'}</button>
           <button class="btn-primary" id="regSaveBtn">Сохранить</button>
         </div>
       </div>
@@ -1266,7 +1302,7 @@ function showRegistrationModal(transponder) {
       if (e.key === 'Escape') skipBtn.click();
     });
 
-    requestAnimationFrame(() => input.focus());
+    requestAnimationFrame(() => { input.focus(); if (isRename) input.select(); });
   });
 }
 
